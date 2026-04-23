@@ -1,0 +1,210 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { background: #080810; color: #e0e0e8; overflow-x: hidden; }
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: -1;
+  -webkit-transform: translateZ(0);
+}
+
+.bg-orb { position: fixed; border-radius: 50%; filter: blur(120px); opacity: 0.15; pointer-events: none; z-index: 0; -webkit-transform: translateZ(0); will-change: transform; }
+.bg-orb-1 { width: 600px; height: 600px; background: #00F2FE; top: -200px; right: -100px; }
+.bg-orb-2 { width: 500px; height: 500px; background: #C471F5; bottom: -150px; left: -100px; }
+.bg-orb-3 { width: 400px; height: 400px; background: #4FACFE; top: 40%; left: 50%; transform: translateX(-50%); }
+
+@media (max-width: 639px) {
+  .bg-orb { filter: blur(80px); opacity: 0.10; }
+  body::before { display: none; }
+}
+
+@media (min-width: 640px) {
+  .bg-orb { opacity: 0.12; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #1a1a28 25%, #252535 50%, #1a1a28 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
+
+select option { background: #1a1a28; color: #e0e0e8; }
+
+/* Mobile-specific utilities */
+.touch-manipulation { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.active\:scale-98:active { transform: scale(0.98); }
+.active\:scale-95:active { transform: scale(0.95); }
+
+/* Better mobile scrolling and interactions */
+@media (max-width: 639px) {
+  * { 
+    -webkit-overflow-scrolling: touch; 
+    /* Prevent text selection on mobile */
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+  }
+  
+  /* Allow text selection for inputs only */
+  input, textarea { 
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+  }
+  
+  /* Remove focus outlines on mobile */
+  button:focus, input:focus, select:focus { outline: none; }
+  
+  /* Better button touch feedback */
+  button {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Prevent zoom on input focus */
+  input[type="text"], input[type="number"], input[type="email"], textarea, select {
+    font-size: 16px !important;
+  }
+  
+  /* Smooth scrolling for modals */
+  .modal-content {
+    scroll-behavior: smooth;
+    overscroll-behavior: contain;
+  }
+  
+  /* Better visual feedback for active states */
+  .touch-active:active {
+    transform: scale(0.98);
+    transition: transform 0.1s ease-out;
+  }
+}
+
+/* iOS safe area support */
+@supports (padding: max(0px)) {
+  .pb-safe {
+    padding-bottom: max(env(safe-area-inset-bottom), 1rem);
+  }
+  
+  .pt-safe {
+    padding-top: max(env(safe-area-inset-top), 1rem);
+  }
+}
+
+/* Enhanced mobile button interactions */
+.mobile-button {
+  min-height: 48px; /* Minimum touch target size */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 639px) {
+  .mobile-button {
+    min-height: 52px; /* Slightly larger on mobile */
+  }
+}
+
+/* Mobile-optimized modal animations */
+@media (max-width: 639px) {
+  .mobile-modal-enter {
+    animation: slideUpMobile 0.3s ease-out;
+  }
+  
+  .mobile-modal-exit {
+    animation: slideDownMobile 0.25s ease-in;
+  }
+}
+
+@keyframes slideUpMobile {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideDownMobile {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+/* Better spacing for mobile cards */
+@media (max-width: 639px) {
+  .mobile-card {
+    margin: 1rem 0;
+    border-radius: 1rem;
+  }
+  
+  .mobile-card-content {
+    padding: 1.5rem 1.25rem;
+  }
+}
+
+/* Enhanced mobile utilities */
+@layer utilities {
+  .touch-manipulation {
+    touch-action: manipulation;
+  }
+  
+  .safe-area-pb {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  .safe-area-pt {
+    padding-top: env(safe-area-inset-top);
+  }
+  
+  /* Prevent zoom on mobile form inputs */
+  .no-zoom {
+    transform-origin: left top;
+    transform: scale(1);
+    transition: none;
+  }
+}
+
+/* Mobile-specific improvements */
+@media (max-width: 639px) {
+  /* Reduce background orb blur for better performance */
+  .bg-orb {
+    filter: blur(60px);
+    will-change: auto;
+  }
+  
+  /* Better touch targets */
+  button, [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Smoother animations on mobile */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Prevent overscroll bounce */
+  body {
+    overscroll-behavior: none;
+  }
+}
