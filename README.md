@@ -35,3 +35,7 @@ What it does not prove:
 - wallet approval/send execution
 - LayerZero or Stargate message delivery on the destination chain
 - relayer settlement after a real source-chain transaction
+## Deployment notes
+
+- Root-hosted deployments like Netlify, Vercel, or a custom domain should leave `NEXT_PUBLIC_BASE_PATH` empty.
+- Only set `NEXT_PUBLIC_BASE_PATH` when deploying the static export under a subpath, for example `/telos-bridge-v3`.

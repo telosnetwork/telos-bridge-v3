@@ -23,6 +23,7 @@ import { useAnimation } from './AnimationProvider'
 
 // Token logos for the "You receive" section
 const TOKEN_LOGOS = TOKEN_ICONS
+const ISSUE_REPORT_BASE_URL = 'https://github.com/telosnetwork/telos-bridge-v3/issues/new'
 
 // ERC20 ABI for balanceOf
 const ERC20_ABI = [
@@ -109,6 +110,73 @@ function getCanonicalTokenAddress(token: string, chainId: number): string | unde
   return getTokenAddress(token, chainId)
 }
 
+function getChainLabel(chainId: number): string {
+  return CHAIN_MAP.get(chainId)?.name ?? `Chain ${chainId}`
+}
+
+function buildIssueReportUrl({
+  token,
+  fromChain,
+  toChain,
+  amount,
+  walletChainId,
+  routeLabel,
+  error,
+}: {
+  token: string
+  fromChain: number
+  toChain: number
+  amount: string
+  walletChainId?: number
+  routeLabel: string
+  error: ErrorInfo | null
+}) {
+  const fromChainLabel = getChainLabel(fromChain)
+  const toChainLabel = getChainLabel(toChain)
+  const walletChainLabel = walletChainId ? `${getChainLabel(walletChainId)} (${walletChainId})` : 'Not connected'
+
+  const bodyLines = [
+    '## What happened',
+    'Describe the issue you ran into.',
+    '',
+    '## Route context',
+    `- Token: ${token}`,
+    `- From chain: ${fromChainLabel} (${fromChain})`,
+    `- To chain: ${toChainLabel} (${toChain})`,
+    `- Amount entered: ${amount || 'Not provided'}`,
+    `- Route type: ${routeLabel}`,
+    `- Wallet network: ${walletChainLabel}`,
+  ]
+
+  if (error) {
+    bodyLines.push(
+      '',
+      '## App error',
+      `- Error type: ${error.type}`,
+      `- Message: ${error.message}`,
+    )
+
+    if (error.details) {
+      bodyLines.push(`- Details: ${error.details}`)
+    }
+  }
+
+  bodyLines.push(
+    '',
+    '## Reproduction steps',
+    '1. Open the bridge route above.',
+    '2. Enter the same token, chains, and amount.',
+    '3. Describe what happened next.',
+  )
+
+  const params = new URLSearchParams({
+    title: `Bridge issue: ${token} ${fromChainLabel} -> ${toChainLabel}`,
+    body: bodyLines.join('\n'),
+  })
+
+  return `${ISSUE_REPORT_BASE_URL}?${params.toString()}`
+}
+
 export function BridgeForm() {
   const { address, chainId: walletChainId } = useAccount()
   const { openConnectModal } = useConnectModal()
@@ -192,11 +260,27 @@ export function BridgeForm() {
   const hasQuote = !!(oftQuote || v2Quote)
   const wrongNetwork = address && walletChainId !== fromChain
 
-  const chainName = (id: number) => CHAIN_MAP.get(id)?.name || `Chain ${id}`
+  const chainName = (id: number) => getChainLabel(id)
   const chainIcon = (id: number) => CHAIN_MAP.get(id)?.icon
 
   // Check for insufficient balance
   const insufficientBalance = !!(address && displayBalance && amount && parseFloat(amount) > parseFloat(displayBalance.formatted))
+  const routeLabel = isMst
+    ? 'MST OFT V1'
+    : isOft
+      ? 'TLOS OFT V1'
+      : isV2
+        ? 'OFT V2'
+        : 'Unsupported or unknown route'
+  const issueReportUrl = buildIssueReportUrl({
+    token,
+    fromChain,
+    toChain,
+    amount,
+    walletChainId,
+    routeLabel,
+    error,
+  })
 
   // Get chains that support the selected token
   const getChainsForToken = useCallback((tok: string) => {
@@ -656,6 +740,20 @@ export function BridgeForm() {
         <span className="inline-flex items-center gap-1.5 text-xs text-telos-cyan/70 bg-telos-cyan/5 border border-telos-cyan/10 rounded-full px-3 py-1.5">
           Cross-chain transfers with transparent fee refunds
         </span>
+        <div className="mt-3">
+          <a
+            href={issueReportUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+          >
+            <span>Report an issue</span>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h4m0 0v4m0-4L10 14" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h3m-3 0v10a1 1 0 001 1h10a1 1 0 001-1v-3" />
+            </svg>
+          </a>
+        </div>
       </div>
 
       {/* Recent Transactions Modal */}
