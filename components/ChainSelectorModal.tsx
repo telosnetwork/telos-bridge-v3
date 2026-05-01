@@ -1,7 +1,6 @@
 'use client'
 
-import { useState } from 'react'
-import { MobileModal, MobileInput, MobileButton } from './MobileOptimizations'
+import { useEffect, useRef, useState } from 'react'
 
 interface Chain {
   id: number
@@ -33,6 +32,7 @@ export function ChainSelectorModal({
 }: ChainSelectorModalProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const modalRef = useRef<HTMLDivElement>(null)
   
   const chainColor = color || CHAIN_COLORS[selectedChainId] || '#666'
   const selectedChain = chains.find(c => c.id === selectedChainId)
@@ -47,12 +47,38 @@ export function ChainSelectorModal({
     setSearchQuery('')
   }
 
+  useEffect(() => {
+    if (!isOpen) return
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
+        setIsOpen(false)
+        setSearchQuery('')
+      }
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false)
+        setSearchQuery('')
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isOpen])
+
   return (
     <>
       {/* Trigger Button */}
       <button
         onClick={() => setIsOpen(true)}
-        className={`flex-1 min-w-0 bg-[#1a1a28] rounded-xl p-3 sm:p-4 hover:bg-[#1e1e30] hover:ring-1 hover:ring-gray-600/20 transition-all duration-200 group text-left ${className}`}
+        className={`w-full flex-1 min-w-0 border border-transparent bg-[#1a1a28] rounded-xl p-3 sm:p-4 text-left shadow-[0_0_0_rgba(0,0,0,0)] transition-all duration-200 group hover:-translate-y-0.5 hover:bg-[#1e1e30] hover:border-gray-600/40 hover:ring-1 hover:ring-gray-600/20 hover:shadow-lg hover:shadow-black/25 ${className}`}
       >
         <p className="text-xs text-gray-500 uppercase tracking-wider mb-2 group-hover:text-gray-400 transition-colors">
           {label}
@@ -61,14 +87,14 @@ export function ChainSelectorModal({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 sm:gap-3">
             <div 
-              className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg overflow-hidden flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg overflow-hidden flex items-center justify-center shrink-0 group-hover:scale-[1.03] transition-transform duration-200"
               style={{ background: `${chainColor}25` }}
             >
               {selectedChain?.icon && (
                 <img 
                   src={selectedChain.icon} 
                   alt="" 
-                  className="w-5 h-5 sm:w-6 sm:h-6 group-hover:scale-110 transition-transform duration-200" 
+                  className="w-5 h-5 sm:w-6 sm:h-6 group-hover:scale-105 transition-transform duration-200"
                 />
               )}
             </div>
@@ -80,7 +106,7 @@ export function ChainSelectorModal({
           
           {/* Chevron */}
           <svg 
-            className="w-4 h-4 text-gray-500 group-hover:text-gray-400 transition-all duration-200 group-hover:translate-x-0.5"
+            className="w-4 h-4 text-gray-500 group-hover:text-gray-300 transition-all duration-200 group-hover:translate-x-0.5"
             fill="none" 
             stroke="currentColor" 
             viewBox="0 0 24 24"
@@ -93,7 +119,7 @@ export function ChainSelectorModal({
       {/* Modal */}
       {isOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 sm:pt-16" onClick={() => setIsOpen(false)}>
-          <div className="bg-[#12121a] border-0 sm:border border-gray-800/50 rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 pt-5 sm:pt-6 w-full sm:max-w-md max-h-[80vh] sm:max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+          <div ref={modalRef} className="bg-[#12121a] border-0 sm:border border-gray-800/50 rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 pt-5 sm:pt-6 w-full sm:max-w-md max-h-[80vh] sm:max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
             {/* Header */}
             <div className="flex items-center justify-between mb-4 sm:mb-6">
               <h3 className="text-xl font-bold text-white">Select {label}</h3>
@@ -172,18 +198,11 @@ export function ChainSelectorModal({
                           </div>
                           
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between">
-                              <span className={`font-semibold transition-colors ${
-                                isSelected ? 'text-telos-cyan' : 'text-white group-hover:text-gray-200'
-                              }`}>
-                                {chain.name}
-                              </span>
-                              {isSelected && (
-                                <svg className="w-5 h-5 text-telos-cyan" fill="currentColor" viewBox="0 0 20 20">
-                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                </svg>
-                              )}
-                            </div>
+                            <span className={`font-semibold transition-colors ${
+                              isSelected ? 'text-telos-cyan' : 'text-white group-hover:text-gray-200'
+                            }`}>
+                              {chain.name}
+                            </span>
                             <p className="text-sm text-gray-500 truncate">
                               Chain ID: {chain.id}
                             </p>

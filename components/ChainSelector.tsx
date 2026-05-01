@@ -54,22 +54,22 @@ export function ChainSelector({
     <div className="flex-1 min-w-0 relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="w-full bg-[#1a1a28] rounded-xl p-3 sm:p-4 hover:bg-[#1e1e30] hover:ring-1 hover:ring-gray-600/20 transition-all duration-200 group text-left"
+        className="w-full border border-transparent bg-[#1a1a28] rounded-xl p-3 sm:p-4 text-left shadow-[0_0_0_rgba(0,0,0,0)] transition-all duration-200 group hover:-translate-y-0.5 hover:bg-[#1e1e30] hover:border-gray-600/40 hover:ring-1 hover:ring-gray-600/20 hover:shadow-lg hover:shadow-black/25"
       >
         <p className="text-xs text-gray-500 uppercase tracking-wider mb-2 group-hover:text-gray-400 transition-colors">
           {label}
         </p>
         <div className="flex items-center gap-2 sm:gap-3">
           <div 
-            className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg overflow-hidden flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200"
+            className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg overflow-hidden flex items-center justify-center shrink-0 group-hover:scale-[1.03] transition-transform duration-200"
             style={{ background: `${chainColor}25` }}
           >
             {selected?.icon && (
-              <img src={selected.icon} alt="" className="w-5 h-5 sm:w-6 sm:h-6" />
+              <img src={selected.icon} alt="" className="w-5 h-5 sm:w-6 sm:h-6 group-hover:scale-105 transition-transform duration-200" />
             )}
           </div>
           <span className="text-white font-semibold text-sm sm:text-base truncate flex-1">{selected?.name || 'Select'}</span>
-          <svg className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} viewBox="0 0 12 12" fill="none">
+          <svg className={`w-4 h-4 text-gray-500 transition-all duration-200 group-hover:text-gray-300 group-hover:translate-x-0.5 ${open ? 'rotate-180' : ''}`} viewBox="0 0 12 12" fill="none">
             <path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
           </svg>
         </div>

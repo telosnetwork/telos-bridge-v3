@@ -1,5 +1,5 @@
 // Direct TLOS OFT bridging via LayerZero V1
-// NativeOFT pattern: msg.value = amount + LZ fee (no ERC20 approval needed)
+// Telos source uses a NativeOFT adapter. Other source chains use ERC20 OFT contracts.
 // Tested: 1 TLOS Telos→Base successful (tx 0x7da5920b...)
 
 import { parseEther, formatEther, type Address, type Hex, getAddress } from 'viem'
@@ -32,7 +32,7 @@ export const TLOS_OFT_ADDRESSES: Record<number, Address> = {
   43114: '0xed667dC80a45b77305Cc395DB56D997597Dc6DdD',  // Avalanche
   137: '0x193f4A4a6ea24102F49b931DEeeb931f6E32405d',    // Polygon
   42161: '0x193f4A4a6ea24102F49b931DEeeb931f6E32405d',  // Arbitrum
-  8453: '0x7252c865c05378Ffc15120F428dd65804dD0Ce63',   // Base
+  8453: '0x7252c865c05378Ffc15120F428dd65804dD0CE63',   // Base
 }
 
 // LayerZero V1 chain IDs
@@ -142,6 +142,45 @@ export interface OftQuoteResult {
   feeEstimated: boolean
 }
 
+async function resolveV1NativeFee(
+  publicClient: any,
+  oftAddress: Address,
+  dstChainId: number,
+  amountLD: bigint,
+  toBytes32: Hex,
+  fromChain: number,
+): Promise<{ nativeFee: bigint; feeEstimated: boolean }> {
+  // Try 1: OFT contract's quote
+  try {
+    const result = await publicClient.readContract({
+      address: oftAddress,
+      abi: OFT_V1_ABI,
+      functionName: 'estimateSendFee',
+      args: [dstChainId, toBytes32, amountLD, false, DEFAULT_ADAPTER_PARAMS],
+    }) as [bigint, bigint]
+
+    return { nativeFee: result[0], feeEstimated: false }
+  } catch {}
+
+  // Try 2: LayerZero endpoint direct
+  try {
+    const endpointResult = await publicClient.readContract({
+      address: LZ_ENDPOINT,
+      abi: LZ_ENDPOINT_ABI,
+      functionName: 'estimateFees',
+      args: [dstChainId, oftAddress, '0x' as Hex, false, DEFAULT_ADAPTER_PARAMS],
+    }) as [bigint, bigint]
+
+    return { nativeFee: endpointResult[0], feeEstimated: false }
+  } catch {}
+
+  // Try 3: Hardcoded fallback (direction-aware)
+  return {
+    nativeFee: ((fromChain === 40) ? FALLBACK_FEES_FROM_TELOS[dstChainId] : FALLBACK_FEES_TO_TELOS[fromChain]) || DEFAULT_FALLBACK_FEE,
+    feeEstimated: true,
+  }
+}
+
 export async function quoteOftSend(
   publicClient: any,
   fromChain: number,
@@ -156,34 +195,14 @@ export async function quoteOftSend(
   const amountLD = parseEther(amount)
   const toBytes32 = addressToBytes32(toAddress)
 
-  let nativeFee: bigint
-  let feeEstimated = false
-
-  // Try 1: OFT contract's estimateSendFee
-  try {
-    const result = await publicClient.readContract({
-      address: oftAddress,
-      abi: OFT_V1_ABI,
-      functionName: 'estimateSendFee',
-      args: [dstChainId, toBytes32, amountLD, false, DEFAULT_ADAPTER_PARAMS],
-    }) as [bigint, bigint]
-    nativeFee = result[0]
-  } catch {
-    // Try 2: Call LZ Endpoint directly (works even when OFT wrapper reverts)
-    try {
-      const endpointResult = await publicClient.readContract({
-        address: LZ_ENDPOINT,
-        abi: LZ_ENDPOINT_ABI,
-        functionName: 'estimateFees',
-        args: [dstChainId, oftAddress, '0x' as Hex, false, DEFAULT_ADAPTER_PARAMS],
-      }) as [bigint, bigint]
-      nativeFee = endpointResult[0]
-    } catch {
-      // Try 3: Hardcoded fallback (direction-aware)
-      nativeFee = ((fromChain === 40) ? FALLBACK_FEES_FROM_TELOS[dstChainId] : FALLBACK_FEES_TO_TELOS[fromChain]) || DEFAULT_FALLBACK_FEE
-      feeEstimated = true
-    }
-  }
+  const { nativeFee, feeEstimated } = await resolveV1NativeFee(
+    publicClient,
+    oftAddress,
+    dstChainId,
+    amountLD,
+    toBytes32,
+    fromChain,
+  )
 
   return {
     nativeFee,
@@ -262,33 +281,14 @@ export async function quoteMstSend(
   const amountLD = parseEther(amount)
   const toBytes32 = addressToBytes32(toAddress)
 
-  let nativeFee: bigint
-  let feeEstimated = false
-
-  // Try 1: OFT contract's estimateSendFee
-  try {
-    const result = await publicClient.readContract({
-      address: oftAddress,
-      abi: OFT_V1_ABI,
-      functionName: 'estimateSendFee',
-      args: [dstChainId, toBytes32, amountLD, false, DEFAULT_ADAPTER_PARAMS],
-    }) as [bigint, bigint]
-    nativeFee = result[0]
-  } catch {
-    // Try 2: LZ Endpoint direct
-    try {
-      const endpointResult = await publicClient.readContract({
-        address: LZ_ENDPOINT,
-        abi: LZ_ENDPOINT_ABI,
-        functionName: 'estimateFees',
-        args: [dstChainId, oftAddress, '0x' as Hex, false, DEFAULT_ADAPTER_PARAMS],
-      }) as [bigint, bigint]
-      nativeFee = endpointResult[0]
-    } catch {
-      nativeFee = ((fromChain === 40) ? FALLBACK_FEES_FROM_TELOS[dstChainId] : FALLBACK_FEES_TO_TELOS[fromChain]) || DEFAULT_FALLBACK_FEE
-      feeEstimated = true
-    }
-  }
+  const { nativeFee, feeEstimated } = await resolveV1NativeFee(
+    publicClient,
+    oftAddress,
+    dstChainId,
+    amountLD,
+    toBytes32,
+    fromChain,
+  )
 
   return {
     nativeFee,
@@ -341,17 +341,16 @@ export async function executeMstSend(
   }
 
   onStatus('Getting LayerZero fee quote...')
-  let nativeFee: bigint
-  try {
-    const result = await publicClient.readContract({
-      address: oftAddress,
-      abi: OFT_V1_ABI,
-      functionName: 'estimateSendFee',
-      args: [dstChainId, toBytes32, amountLD, false, DEFAULT_ADAPTER_PARAMS],
-    }) as [bigint, bigint]
-    nativeFee = result[0]
-  } catch {
-    nativeFee = ((fromChain === 40) ? FALLBACK_FEES_FROM_TELOS[dstChainId] : FALLBACK_FEES_TO_TELOS[fromChain]) || DEFAULT_FALLBACK_FEE
+  const { nativeFee, feeEstimated } = await resolveV1NativeFee(
+    publicClient,
+    oftAddress,
+    dstChainId,
+    amountLD,
+    toBytes32,
+    fromChain,
+  )
+
+  if (feeEstimated) {
     onStatus('Using estimated fee (excess will be refunded)...')
   }
 
@@ -381,8 +380,11 @@ export async function executeMstSend(
   })
 
   onStatus('Transaction submitted, waiting for confirmation...')
-  await publicClient.waitForTransactionReceipt({ hash: txHash })
-  onStatus('✅ MST bridged via LayerZero! Track at layerzeroscan.com/tx/' + txHash)
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+  if (receipt.status !== 'success') {
+    throw new Error(`Source transaction reverted on-chain: ${txHash}`)
+  }
+  onStatus('Source transaction confirmed. Waiting for LayerZero delivery... Track at layerzeroscan.com/tx/' + txHash)
 
   return { txHash }
 }
@@ -404,27 +406,56 @@ export async function executeOftSend(
 
   const amountLD = parseEther(amount)
   const toBytes32 = addressToBytes32(toAddress)
+  const isNativeTlosSource = fromChain === 40
+
+  if (!isNativeTlosSource) {
+    onStatus('Checking TLOS allowance...')
+    const currentAllowance = await publicClient.readContract({
+      address: oftAddress,
+      abi: ERC20_ABI,
+      functionName: 'allowance',
+      args: [fromAddress, oftAddress],
+    }) as bigint
+
+    if (currentAllowance < amountLD) {
+      onStatus('Approving TLOS spend — confirm in wallet...')
+      const approveTx = await walletClient.writeContract({
+        address: oftAddress,
+        abi: ERC20_ABI,
+        functionName: 'approve',
+        args: [oftAddress, amountLD],
+        chain: undefined,
+        account: fromAddress,
+      })
+
+      const approvalReceipt = await publicClient.waitForTransactionReceipt({ hash: approveTx })
+      if (approvalReceipt.status !== 'success') {
+        throw new Error(`TLOS approval reverted on-chain: ${approveTx}`)
+      }
+
+      onStatus('Approved TLOS spend.')
+    }
+  }
 
   onStatus('Getting LayerZero fee quote...')
-  let nativeFee: bigint
-  try {
-    const result = await publicClient.readContract({
-      address: oftAddress,
-      abi: OFT_V1_ABI,
-      functionName: 'estimateSendFee',
-      args: [dstChainId, toBytes32, amountLD, false, DEFAULT_ADAPTER_PARAMS],
-    }) as [bigint, bigint]
-    nativeFee = result[0]
-  } catch {
-    nativeFee = ((fromChain === 40) ? FALLBACK_FEES_FROM_TELOS[dstChainId] : FALLBACK_FEES_TO_TELOS[fromChain]) || DEFAULT_FALLBACK_FEE
+  const { nativeFee, feeEstimated } = await resolveV1NativeFee(
+    publicClient,
+    oftAddress,
+    dstChainId,
+    amountLD,
+    toBytes32,
+    fromChain,
+  )
+
+  if (feeEstimated) {
     onStatus('Using estimated fee (excess will be refunded)...')
   }
 
   // Add 10% buffer to fee; LayerZero refunds any excess
   const feeWithBuffer = nativeFee + nativeFee / 10n
 
-  // NativeOFT: msg.value = TLOS amount + LZ fee (no ERC20 approval needed)
-  const totalValue = amountLD + feeWithBuffer
+  // NativeOFT from Telos attaches amount + fee. ERC20 OFTs attach only the LZ fee.
+  const totalValue = isNativeTlosSource ? amountLD + feeWithBuffer : feeWithBuffer
 
   onStatus('Confirm in wallet...')
   const txHash = await walletClient.writeContract({
@@ -449,8 +480,11 @@ export async function executeOftSend(
   })
 
   onStatus('Transaction submitted, waiting for confirmation...')
-  await publicClient.waitForTransactionReceipt({ hash: txHash })
-  onStatus('✅ TLOS bridged via LayerZero! Track at layerzeroscan.com/tx/' + txHash)
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+  if (receipt.status !== 'success') {
+    throw new Error(`Source transaction reverted on-chain: ${txHash}`)
+  }
+  onStatus('Source transaction confirmed. Waiting for LayerZero delivery... Track at layerzeroscan.com/tx/' + txHash)
 
   return { txHash }
 }

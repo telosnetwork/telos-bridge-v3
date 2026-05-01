@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { TOKEN_ICONS } from '@/lib/constants'
 
 interface TokenSelectorModalProps {
@@ -13,7 +13,7 @@ const TOKEN_LOGOS = TOKEN_ICONS
 
 const TOKEN_INFO: Record<string, { name: string; description: string; category: string }> = {
   TLOS: { name: 'Telos', description: 'Native token of Telos EVM', category: 'Native' },
-  USDC: { name: 'USD Coin', description: 'Stablecoin by Centre', category: 'Stablecoin' },
+  USDC: { name: 'USD Coin', description: 'Dollar stablecoin by Circle', category: 'Stablecoin' },
   USDT: { name: 'Tether USD', description: 'Stablecoin by Tether', category: 'Stablecoin' },
   ETH: { name: 'Ethereum', description: 'Native Ethereum token', category: 'Native' },
   WBTC: { name: 'Wrapped Bitcoin', description: 'Bitcoin on Ethereum', category: 'Wrapped' },
@@ -32,6 +32,7 @@ const TOKEN_COLORS: Record<string, string> = {
 export function TokenSelectorModal({ selectedToken, tokens, onTokenChange }: TokenSelectorModalProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const modalRef = useRef<HTMLDivElement>(null)
   
   const filteredTokens = tokens.filter(token => {
     const info = TOKEN_INFO[token]
@@ -54,6 +55,32 @@ export function TokenSelectorModal({ selectedToken, tokens, onTokenChange }: Tok
     setIsOpen(false)
     setSearchQuery('')
   }
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
+        setIsOpen(false)
+        setSearchQuery('')
+      }
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false)
+        setSearchQuery('')
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isOpen])
 
   if (tokens.length === 1) {
     // Single token, no modal needed
@@ -107,7 +134,7 @@ export function TokenSelectorModal({ selectedToken, tokens, onTokenChange }: Tok
       {/* Modal */}
       {isOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 sm:pt-16" onClick={() => setIsOpen(false)}>
-          <div className="bg-[#12121a] border-0 sm:border border-gray-800/50 rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 w-full sm:max-w-md max-h-[80vh] sm:max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+          <div ref={modalRef} className="bg-[#12121a] border-0 sm:border border-gray-800/50 rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 w-full sm:max-w-md max-h-[80vh] sm:max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
             {/* Header */}
             <div className="flex items-center justify-between mb-4 sm:mb-6">
               <h3 className="text-xl font-bold text-white">Select Token</h3>
@@ -191,27 +218,18 @@ export function TokenSelectorModal({ selectedToken, tokens, onTokenChange }: Tok
                                 </div>
                                 
                                 <div className="flex-1 min-w-0">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <div className="flex items-center gap-2">
-                                        <span className={`font-semibold transition-colors ${
-                                          isSelected ? 'text-telos-cyan' : 'text-white group-hover:text-gray-200'
-                                        }`}>
-                                          {token}
-                                        </span>
-                                        {isSelected && (
-                                          <svg className="w-4 h-4 text-telos-cyan" fill="currentColor" viewBox="0 0 20 20">
-                                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                          </svg>
-                                        )}
-                                      </div>
-                                      {info && (
-                                        <>
-                                          <p className="text-sm text-gray-400">{info.name}</p>
-                                          <p className="text-xs text-gray-600 truncate">{info.description}</p>
-                                        </>
-                                      )}
-                                    </div>
+                                  <div>
+                                    <span className={`font-semibold transition-colors ${
+                                      isSelected ? 'text-telos-cyan' : 'text-white group-hover:text-gray-200'
+                                    }`}>
+                                      {token}
+                                    </span>
+                                    {info && (
+                                      <>
+                                        <p className="text-sm text-gray-400">{info.name}</p>
+                                        <p className="text-xs text-gray-600 truncate">{info.description}</p>
+                                      </>
+                                    )}
                                   </div>
                                 </div>
                               </div>

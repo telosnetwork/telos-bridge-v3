@@ -556,8 +556,11 @@ export async function executeOftV2Send(
   })
 
   onStatus('Transaction submitted, waiting for confirmation...')
-  await publicClient.waitForTransactionReceipt({ hash: txHash })
-  onStatus(`✅ ${config.symbol} bridged! Track at layerzeroscan.com/tx/${txHash}`)
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+  if (receipt.status !== 'success') {
+    throw new Error(`Source transaction reverted on-chain: ${txHash}`)
+  }
+  onStatus(`Source transaction confirmed. Waiting for LayerZero delivery... Track at layerzeroscan.com/tx/${txHash}`)
 
   return { txHash }
 }
