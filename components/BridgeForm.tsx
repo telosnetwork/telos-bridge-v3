@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAccount, useBalance, useSwitchChain, useWalletClient, usePublicClient, useReadContract } from 'wagmi'
-import { createPublicClient, http } from 'viem'
+import { createPublicClient, formatUnits, http } from 'viem'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { SUPPORTED_CHAINS, CHAIN_MAP } from '@/lib/chains'
 import { TOKEN_ICONS } from '@/lib/constants'
@@ -20,6 +20,7 @@ import { TransactionStepper, type TransactionStep } from './TransactionStepper'
 import { RecentTransactions, addTransaction, updateTransaction, type BridgeTransaction } from './RecentTransactions'
 import { SuccessCelebration } from './SuccessCelebration'
 import { useAnimation } from './AnimationProvider'
+import { fetchLayerZeroTxStatus, isLayerZeroTerminalStatus } from '@/lib/layerzeroscan'
 
 // Token logos for the "You receive" section
 const TOKEN_LOGOS = TOKEN_ICONS
@@ -34,8 +35,9 @@ const ERC20_ABI = [
 
 // Get token address on a given chain
 function getTokenAddress(token: string, chainId: number): string | undefined {
-  // TLOS is native
-  if (token === 'TLOS') return undefined
+  if (token === 'TLOS') {
+    return chainId === 40 ? undefined : TLOS_OFT_ADDRESSES[chainId]
+  }
   // MST OFT
   if (token === 'MST' && MST_OFT_ADDRESSES[chainId]) return MST_OFT_ADDRESSES[chainId]
   // V2 OFT tokens (Stargate or LZ)
@@ -92,8 +94,7 @@ const CANONICAL_TOKENS: Record<string, Record<number, string>> = {
 
 // Get canonical token address for balance checking
 function getCanonicalTokenAddress(token: string, chainId: number): string | undefined {
-  // TLOS is always native
-  if (token === 'TLOS') return undefined
+  if (token === 'TLOS') return getTokenAddress(token, chainId)
   
   // ETH is native on most chains - only check ERC20 on Telos
   if (token === 'ETH') {
@@ -210,38 +211,41 @@ export function BridgeForm() {
 
   const { data: nativeBalance } = useBalance({ address, chainId: fromChain })
 
+  const isNativeToken = (token === 'TLOS' && fromChain === 40) || (token === 'ETH' && fromChain !== 40)
+
   // Get ERC20 token address for the selected token on fromChain
   const tokenAddress = getCanonicalTokenAddress(token, fromChain)
 
-  // Fetch ERC20 balance if token is not native TLOS
+  // Fetch ERC20 balance when the selected asset is not the native coin on this chain.
   const { data: erc20BalanceData } = useReadContract({
     address: tokenAddress as `0x${string}`,
     abi: ERC20_ABI,
     functionName: 'balanceOf',
+    chainId: fromChain,
     args: address ? [address] : undefined,
-    query: { enabled: !!address && !!tokenAddress && token !== 'TLOS' }
+    query: { enabled: !!address && !!tokenAddress && !isNativeToken }
   })
 
   const { data: erc20Decimals } = useReadContract({
     address: tokenAddress as `0x${string}`,
     abi: ERC20_ABI,
     functionName: 'decimals',
-    query: { enabled: !!tokenAddress && token !== 'TLOS' }
+    chainId: fromChain,
+    query: { enabled: !!tokenAddress && !isNativeToken }
   })
 
   // Combine native and ERC20 balance
-  // For TLOS: always use native balance
+  // For TLOS on Telos: use native balance
   // For ETH on non-Telos chains: use native balance (ETH is native)
   // For ERC20 tokens: use ERC20 balance
-  let displayBalance = nativeBalance
-  const isNativeToken = token === 'TLOS' || (token === 'ETH' && fromChain !== 40)
+  let displayBalance = isNativeToken ? nativeBalance : undefined
   
   if (!isNativeToken && erc20BalanceData !== undefined && erc20Decimals !== undefined) {
     const bal = BigInt(erc20BalanceData as any)
     const dec = Number(erc20Decimals)
     displayBalance = {
       ...nativeBalance,
-      formatted: (Number(bal) / Math.pow(10, dec)).toString(),
+      formatted: formatUnits(bal, dec),
       value: bal,
       decimals: dec,
       symbol: token,
@@ -375,6 +379,95 @@ export function BridgeForm() {
     return () => { if (quoteTimeout.current) clearTimeout(quoteTimeout.current) }
   }, [amount, fromChain, toChain, token])
 
+  useEffect(() => {
+    if (!transactionHash || !currentTransactionId || transactionStep === 'idle' || transactionStep === 'completed') {
+      return
+    }
+
+    let cancelled = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    let controller: AbortController | null = null
+    const destinationChainLabel = getChainLabel(toChain)
+
+    const scheduleNextPoll = () => {
+      if (!cancelled) {
+        timeoutId = setTimeout(pollDeliveryStatus, 8000)
+      }
+    }
+
+    const pollDeliveryStatus = async () => {
+      controller?.abort()
+      controller = new AbortController()
+
+      try {
+        const status = await fetchLayerZeroTxStatus(transactionHash, controller.signal)
+
+        if (cancelled || !status) {
+          scheduleNextPoll()
+          return
+        }
+
+        if (status.status === 'DELIVERED') {
+          setBridgeStatus(`Destination confirmed on ${destinationChainLabel}.`)
+          setTransactionStep('completed')
+          setShowSuccessCelebration(true)
+          updateTransaction(currentTransactionId, {
+            status: 'completed',
+            toTxHash: status.destinationTxHash,
+          })
+          return
+        }
+
+        if (status.status === 'CONFIRMING') {
+          setBridgeStatus(`Destination transaction submitted on ${destinationChainLabel}. Waiting for finality...`)
+          setTransactionStep('bridging')
+          updateTransaction(currentTransactionId, {
+            status: 'pending',
+            toTxHash: status.destinationTxHash,
+          })
+          scheduleNextPoll()
+          return
+        }
+
+        if (status.status === 'INFLIGHT') {
+          setBridgeStatus(`Waiting for LayerZero delivery to ${destinationChainLabel}...`)
+          setTransactionStep('bridging')
+          updateTransaction(currentTransactionId, {
+            status: 'pending',
+          })
+          scheduleNextPoll()
+          return
+        }
+
+        if (isLayerZeroTerminalStatus(status.status)) {
+          setBridgeStatus(null)
+          setError(createError(
+            'bridge_failed',
+            'Destination delivery failed',
+            status.statusMessage || `LayerZero reported ${status.status} for this message.`,
+          ))
+          updateTransaction(currentTransactionId, {
+            status: 'failed',
+            toTxHash: status.destinationTxHash,
+          })
+          return
+        }
+
+        scheduleNextPoll()
+      } catch {
+        scheduleNextPoll()
+      }
+    }
+
+    pollDeliveryStatus()
+
+    return () => {
+      cancelled = true
+      controller?.abort()
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [transactionHash, currentTransactionId, transactionStep, toChain])
+
   const handleBridge = useCallback(async () => {
     if (!address) {
       setError(createError('wallet_not_connected', 'Connect your wallet first', 
@@ -393,6 +486,7 @@ export function BridgeForm() {
     }
     setBridging(true); setError(null); setBridgeStatus('Preparing…')
     setTransactionStep('submitted')
+    setTransactionHash(undefined)
 
     // Create transaction record in localStorage
     const transaction = addTransaction({
@@ -406,7 +500,7 @@ export function BridgeForm() {
 
     // Enhanced status callback that updates both status and stepper
     const updateProgress = (status: string, hash?: string) => {
-      // Extract tx hash from LZ status messages like "✅ TLOS bridged via LayerZero! Track at layerzeroscan.com/tx/0x..."
+      // Extract tx hash from status messages that include a LayerZero tracker URL
       const hashMatch = status.match(/0x[a-fA-F0-9]{60,66}/)
       const extractedHash = hash || (hashMatch ? hashMatch[0] : undefined)
 
@@ -424,9 +518,17 @@ export function BridgeForm() {
       // Update stepper based on status keywords
       if (status.toLowerCase().includes('confirm')) {
         setTransactionStep('confirming')
-      } else if (status.toLowerCase().includes('bridg') || status.toLowerCase().includes('relay')) {
+      } else if (
+        status.toLowerCase().includes('bridg') ||
+        status.toLowerCase().includes('relay') ||
+        status.toLowerCase().includes('layerzero delivery') ||
+        status.toLowerCase().includes('track at layerzeroscan')
+      ) {
         setTransactionStep('bridging')
-      } else if (status.toLowerCase().includes('complete') || status.toLowerCase().includes('✅')) {
+      } else if (
+        status.toLowerCase().includes('destination confirmed') ||
+        status.toLowerCase().includes('received on destination')
+      ) {
         setTransactionStep('completed')
         // Mark transaction as completed
         if (transaction.id) {
@@ -455,12 +557,11 @@ export function BridgeForm() {
           address, address, updateProgress)
         setV2Quote(null)
       }
-      setBridgeStatus('Bridge complete. Funds arriving shortly.')
-      setTransactionStep('completed')
-      setShowSuccessCelebration(true)
-      // Ensure transaction is marked completed in localStorage
+      setBridgeStatus('Source transaction confirmed. Waiting for destination delivery. Track progress on LZScan.')
+      setTransactionStep('bridging')
+      // Keep the transaction pending until destination delivery is confirmed
       if (transaction.id) {
-        updateTransaction(transaction.id, { status: 'completed' })
+        updateTransaction(transaction.id, { status: 'pending' })
       }
       setAmount('')
     } catch (e: any) {
@@ -554,7 +655,7 @@ export function BridgeForm() {
         <div className="bg-[#12121a]/80 backdrop-blur-xl rounded-2xl p-4 sm:p-6 md:p-8 space-y-4 sm:space-y-5 shadow-2xl shadow-black/40 transition-all duration-300 hover:shadow-3xl hover:shadow-telos-cyan/5">
 
         {/* Chain selector row */}
-        <div className="relative flex flex-col sm:flex-row items-stretch sm:items-center gap-0 sm:gap-0">
+        <div className="relative flex flex-col sm:flex-row items-stretch sm:items-center gap-0 sm:gap-3">
           {/* From chain */}
           <div className="flex-1 min-w-0 bg-[#1a1a28] rounded-t-xl sm:rounded-xl overflow-hidden">
             <ChainSelectorModal
@@ -567,7 +668,7 @@ export function BridgeForm() {
           </div>
 
           {/* Swap button — between the two selectors */}
-          <div className="relative z-20 flex items-center justify-center sm:mx-1" style={{ marginTop: '-12px', marginBottom: '-12px' }}>
+          <div className="relative z-20 flex items-center justify-center" style={{ marginTop: '-12px', marginBottom: '-12px' }}>
             <button 
               onClick={swap}
               className="w-10 h-10 rounded-full bg-[#1a1a28] border-2 sm:border border-gray-700/50 flex items-center justify-center hover:border-telos-cyan/50 hover:bg-telos-cyan/5 hover:rotate-180 duration-300 text-gray-400 hover:text-telos-cyan shrink-0 group active:scale-95 touch-manipulation shadow-lg shadow-black/50 sm:shadow-none"
@@ -737,10 +838,7 @@ export function BridgeForm() {
       <div className={`text-center ${
         reduceMotion ? '' : 'animate-in fade-in slide-in-from-bottom-2 duration-600 delay-700'
       }`}>
-        <span className="inline-flex items-center gap-1.5 text-xs text-telos-cyan/70 bg-telos-cyan/5 border border-telos-cyan/10 rounded-full px-3 py-1.5">
-          Cross-chain transfers with transparent fee refunds
-        </span>
-        <div className="mt-3">
+        <div>
           <a
             href={issueReportUrl}
             target="_blank"

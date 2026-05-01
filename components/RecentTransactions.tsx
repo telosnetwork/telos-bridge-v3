@@ -176,7 +176,7 @@ export function RecentTransactions({ isOpen, onClose }: RecentTransactionsProps)
                               ? 'bg-yellow-400/10 text-yellow-400'
                               : 'bg-red-400/10 text-red-400'
                         }`}>
-                          {tx.status === 'pending' ? 'submitted' : tx.status}
+                          {tx.status === 'pending' ? (tx.txHash ? 'relaying' : 'submitted') : tx.status}
                         </span>
                         {tx.status === 'pending' && tx.txHash && (
                           <a href={getExplorerUrl(tx.fromChain, tx.txHash)} target="_blank" rel="noopener noreferrer"
