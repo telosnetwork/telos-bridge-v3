@@ -8,8 +8,10 @@ export type TransactionStep = 'idle' | 'submitted' | 'confirming' | 'bridging' |
 interface TransactionStepperProps {
   currentStep: TransactionStep
   txHash?: string
+  destinationTxHash?: string
   fromChainId?: number
   toChainId?: number
+  destinationTxChainId?: number
   estimatedTime?: string
   routeKind?: 'layerzero' | 'zero' | 'zero-to-evm' | 'native-tlos'
 }
@@ -95,7 +97,7 @@ const ZERO_STEPS: StepConfig[] = [
   {
     id: 'bridging',
     label: 'Proving',
-    description: 'Proof relay needed',
+    description: 'Mint proof signature',
     Icon: BridgingIcon,
   },
   {
@@ -124,7 +126,7 @@ const ZERO_TO_EVM_STEPS: StepConfig[] = [
   {
     id: 'bridging',
     label: 'Releasing',
-    description: 'EVM release relay',
+    description: 'Bridge release',
     Icon: BridgingIcon,
   },
   {
@@ -169,8 +171,10 @@ const NATIVE_TLOS_STEPS: StepConfig[] = [
 export function TransactionStepper({
   currentStep,
   txHash,
+  destinationTxHash,
   fromChainId,
   toChainId,
+  destinationTxChainId,
   estimatedTime = '~2 min',
   routeKind = 'layerzero',
 }: TransactionStepperProps) {
@@ -192,9 +196,9 @@ export function TransactionStepper({
   const timeLabel = routeKind === 'native-tlos'
     ? 'Waiting for Zero transfer'
     : routeKind === 'zero-to-evm' && currentStep === 'bridging'
-      ? 'Waiting for EVM release'
+      ? 'Waiting for bridge release'
     : routeKind === 'zero' && currentStep === 'bridging'
-      ? 'Waiting for proof relay'
+      ? 'Waiting for mint proof'
       : `${estimatedTime} remaining`
 
   const getStepStatus = (stepIndex: number) => {
@@ -220,14 +224,14 @@ export function TransactionStepper({
       {/* Progress Bar */}
       <div className="relative">
         <div className="absolute top-5 left-6 right-6 h-0.5 bg-gray-800">
-          <div
+          <div 
             className={`h-full transition-all duration-1000 ease-out ${
-              isCompleted
-                ? 'bg-emerald-400'
+              isCompleted 
+                ? 'bg-emerald-400' 
                 : 'bg-gradient-to-r from-purple-500 to-telos-cyan'
             }`}
-            style={{
-              width: isCompleted ? '100%' : `${((currentStepIndex + 1) / steps.length) * 100}%`
+            style={{ 
+              width: isCompleted ? '100%' : `${((currentStepIndex + 1) / steps.length) * 100}%` 
             }}
           />
         </div>
@@ -246,14 +250,14 @@ export function TransactionStepper({
               <div key={step.id} className="flex flex-col items-center space-y-2">
                 {/* Step Icon */}
                 <div className={`relative w-10 h-10 rounded-full border-2 flex items-center justify-center transition-all duration-500 ${
-                  isCompleted
-                    ? 'border-emerald-400 bg-emerald-400/10 text-emerald-400'
-                    : isCurrent
-                      ? 'border-telos-cyan bg-telos-cyan/10 text-telos-cyan'
+                  isCompleted 
+                    ? 'border-emerald-400 bg-emerald-400/10 text-emerald-400' 
+                    : isCurrent 
+                      ? 'border-telos-cyan bg-telos-cyan/10 text-telos-cyan' 
                       : 'border-gray-700 bg-gray-800/50 text-gray-600'
                 }`}>
                   <Icon />
-
+                  
                   {/* Animated ring for current step */}
                   {isCurrent && !reduceMotion && (
                     <div className="absolute inset-0 rounded-full border border-telos-cyan/30" />
@@ -263,10 +267,10 @@ export function TransactionStepper({
                 {/* Step Label */}
                 <div className="text-center">
                   <div className={`text-xs font-medium transition-colors duration-300 ${
-                    isCompleted
-                      ? 'text-emerald-400'
-                      : isCurrent
-                        ? 'text-telos-cyan'
+                    isCompleted 
+                      ? 'text-emerald-400' 
+                      : isCurrent 
+                        ? 'text-telos-cyan' 
                         : 'text-gray-500'
                   }`}>
                     {label}
@@ -282,25 +286,40 @@ export function TransactionStepper({
       </div>
 
       {/* Transaction Links */}
-      {txHash && (
+      {(txHash || destinationTxHash) && (
         <div className={`pt-2 border-t border-white/[0.03] space-y-1.5 ${
           reduceMotion ? '' : 'animate-in fade-in delay-300 duration-400'
         }`}>
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-gray-500">Source tx</span>
-            <a
-              href={getExplorerUrl(fromChainId, txHash)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-telos-cyan hover:text-telos-cyan/70 transition-colors"
-            >
-              tx link ↗
-            </a>
-          </div>
-          {routeKind === 'layerzero' ? (
+          {txHash && (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-gray-500">Source tx</span>
+              <a
+                href={getExplorerUrl(fromChainId, txHash)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-telos-cyan hover:text-telos-cyan/70 transition-colors"
+              >
+                tx link ↗
+              </a>
+            </div>
+          )}
+          {destinationTxHash && (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-gray-500">Destination tx</span>
+              <a
+                href={getExplorerUrl(destinationTxChainId ?? toChainId, destinationTxHash)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-telos-cyan hover:text-telos-cyan/70 transition-colors"
+              >
+                tx link ↗
+              </a>
+            </div>
+          )}
+          {routeKind === 'layerzero' && txHash ? (
             <div className="flex items-center justify-between text-xs">
               <span className="text-gray-500">LayerZero</span>
-              <a
+              <a 
                 href={`https://layerzeroscan.com/tx/${txHash}`}
                 target="_blank"
                 rel="noopener noreferrer"

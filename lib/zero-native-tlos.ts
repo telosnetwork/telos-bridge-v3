@@ -1,5 +1,6 @@
 import { formatEther, formatUnits, getAddress, isAddress, parseUnits, type Address } from 'viem'
 import { TELOS_EVM_TESTNET_CHAIN_ID, TELOS_ZERO_TESTNET_CHAIN_ID } from '@/lib/chains'
+import { formatAntelopeQuantityRaw } from '@/lib/antelope-asset'
 import { ZERO_API } from '@/lib/zero-evm-demo'
 import { signAndBroadcastZeroActions } from '@/lib/zero-signer'
 
@@ -66,8 +67,9 @@ export function buildZeroNativeTlosTransfer({
   if (!isAddress(evmReceiver)) throw new Error('Enter a valid Telos EVM receiver address')
 
   const normalizedReceiver = getAddress(evmReceiver)
-  const amountFormatted = formatUnits(parseZeroTlosAmount(amount), ZERO_TLOS_PRECISION)
-  const quantity = `${amountFormatted} TLOS`
+  const amountRaw = parseZeroTlosAmount(amount)
+  const amountFormatted = formatUnits(amountRaw, ZERO_TLOS_PRECISION)
+  const quantity = formatAntelopeQuantityRaw(amountRaw, ZERO_TLOS_PRECISION, 'TLOS')
   const args = JSON.stringify([sender, ZERO_TLOS_EVM_DEPOSIT_ACCOUNT, quantity, normalizedReceiver])
 
   return {

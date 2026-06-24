@@ -13,6 +13,7 @@ export interface BridgeTransaction {
   status: 'completed' | 'pending' | 'failed'
   txHash?: string
   toTxHash?: string // For destination chain transaction
+  toTxChain?: number
 }
 
 interface RecentTransactionsProps {
@@ -224,13 +225,24 @@ export function RecentTransactions({ isOpen, onClose }: RecentTransactionsProps)
                             {tx.txHash.slice(0, 6)}...{tx.txHash.slice(-4)} ↗
                           </a>
                         </div>
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-gray-600">LayerZero</span>
-                          <a href={`https://layerzeroscan.com/tx/${tx.txHash}`} target="_blank" rel="noopener noreferrer"
-                            className="text-purple-400 hover:text-purple-300 transition-colors">
-                            Track on LZScan ↗
-                          </a>
-                        </div>
+                        {tx.toTxHash && (
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-gray-600">Destination tx</span>
+                            <a href={getExplorerUrl(tx.toTxChain ?? tx.toChain, tx.toTxHash)} target="_blank" rel="noopener noreferrer"
+                              className="text-telos-cyan hover:text-telos-cyan/70 font-mono transition-colors">
+                              {tx.toTxHash.slice(0, 6)}...{tx.toTxHash.slice(-4)} ↗
+                            </a>
+                          </div>
+                        )}
+                        {tx.fromChain !== -41 && tx.toChain !== -41 && (
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-gray-600">LayerZero</span>
+                            <a href={`https://layerzeroscan.com/tx/${tx.txHash}`} target="_blank" rel="noopener noreferrer"
+                              className="text-purple-400 hover:text-purple-300 transition-colors">
+                              Track on LZScan ↗
+                            </a>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

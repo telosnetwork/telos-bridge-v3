@@ -1,7 +1,8 @@
 import { TELOS_ZERO_TESTNET_CHAIN_ID_HEX } from '@/lib/chains'
 import { ZERO_PUSH_API } from '@/lib/zero-evm-demo'
 
-const ANCHOR_APP_IDENTIFIER = 'telosbridge'
+const ZERO_PUSH_SESSION_KEY = ZERO_PUSH_API.replace(/[^a-z0-9]/gi, '-').toLowerCase()
+const ANCHOR_APP_IDENTIFIER = `telosbridge-${ZERO_PUSH_SESSION_KEY}`
 
 export interface ZeroSignerAccount {
   actor: string
@@ -31,7 +32,7 @@ async function createAnchorLink() {
 
   const transport = new AnchorLinkBrowserTransport({
     requestStatus: false,
-    storagePrefix: `telos-zero-bridge-${ZERO_PUSH_API.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`,
+    storagePrefix: `telos-zero-bridge-${ZERO_PUSH_SESSION_KEY}`,
   })
 
   return new AnchorLink({

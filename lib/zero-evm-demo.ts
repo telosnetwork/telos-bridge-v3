@@ -14,6 +14,7 @@ export const TELOS_TESTNET_EXPLORER = 'https://testnet.teloscan.io'
 export const ZERO_API = normalizeNativeApiUrl(process.env.NEXT_PUBLIC_ZERO_API || 'https://testnet.telos.net')
 export const ZERO_PUSH_API = normalizeNativeApiUrl(process.env.NEXT_PUBLIC_ZERO_PUSH_API || 'https://telostestnet.greymass.com')
 export const ZERO_BRIDGE_ACCOUNT = process.env.NEXT_PUBLIC_ZERO_BRIDGE_ACCOUNT || 'zerobridge'
+export const EMPIRES_FAUCET_URL = process.env.NEXT_PUBLIC_EMPIRES_FAUCET_URL?.trim() || ''
 export const EVM_ESCROW_BRIDGE = publicAddress(process.env.NEXT_PUBLIC_EVM_ESCROW_BRIDGE)
 export const ZERO_BRIDGE_EVM_ADDRESS = publicAddress(process.env.NEXT_PUBLIC_ZERO_BRIDGE_EVM_ADDRESS)
 
@@ -146,6 +147,13 @@ export const EVM_ESCROW_BRIDGE_ABI = [
   },
   {
     type: 'function',
+    name: 'processedZeroBurns',
+    stateMutability: 'view',
+    inputs: [{ name: 'burnId', type: 'bytes32' }],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    type: 'function',
     name: 'releaseToEvm',
     stateMutability: 'nonpayable',
     inputs: [
@@ -175,6 +183,18 @@ export const EVM_ESCROW_BRIDGE_ABI = [
       { indexed: false, name: 'zeroReceiver', type: 'string' },
       { indexed: false, name: 'amount', type: 'uint256' },
       { indexed: false, name: 'requestHash', type: 'bytes32' },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'ZeroToEvmReleased',
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: 'zeroBurnId', type: 'bytes32' },
+      { indexed: true, name: 'pairId', type: 'uint256' },
+      { indexed: true, name: 'receiver', type: 'address' },
+      { indexed: false, name: 'amount', type: 'uint256' },
+      { indexed: false, name: 'zeroSender', type: 'string' },
     ],
   },
 ] as const
