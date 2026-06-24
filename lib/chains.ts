@@ -7,8 +7,18 @@ export interface ChainInfo {
 
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? ''
 
+export const TELOS_EVM_TESTNET_CHAIN_ID = 41
+export const TELOS_ZERO_TESTNET_CHAIN_ID = -41
+export const TELOS_ZERO_TESTNET_CHAIN_ID_HEX = '1eaa0824707c8c16bd25145493bf062aecddfeb56c736f6ba6397f3195f33c9f'
+
+export function isTelosZeroChain(chainId: number) {
+  return chainId === TELOS_ZERO_TESTNET_CHAIN_ID
+}
+
 // Chains with Stargate/LayerZero routes to Telos
 export const SUPPORTED_CHAINS: ChainInfo[] = [
+  { id: TELOS_EVM_TESTNET_CHAIN_ID, name: 'Telos EVM Testnet', icon: `${BASE_PATH}/chains/telos.svg`, nativeCurrency: 'TLOS' },
+  { id: TELOS_ZERO_TESTNET_CHAIN_ID, name: 'Telos Zero Testnet', icon: `${BASE_PATH}/chains/telos.svg`, nativeCurrency: 'TLOS' },
   { id: 40, name: 'Telos', icon: `${BASE_PATH}/chains/telos.svg`, nativeCurrency: 'TLOS' },
   { id: 1, name: 'Ethereum', icon: `${BASE_PATH}/chains/ethereum.png`, nativeCurrency: 'ETH' },
   { id: 8453, name: 'Base', icon: `${BASE_PATH}/chains/base.png`, nativeCurrency: 'ETH' },

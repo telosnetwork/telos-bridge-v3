@@ -18,7 +18,7 @@ interface ChainSelectorModalProps {
 }
 
 const CHAIN_COLORS: Record<number, string> = {
-  1: '#627EEA', 40: '#00F2FE', 8453: '#0052FF', 56: '#F0B90B',
+  [-41]: '#00F2FE', 1: '#627EEA', 40: '#00F2FE', 41: '#00F2FE', 8453: '#0052FF', 56: '#F0B90B',
   42161: '#28A0F0', 137: '#8247E5', 43114: '#E84142', 10: '#FF0420',
 }
 
@@ -204,7 +204,7 @@ export function ChainSelectorModal({
                               {chain.name}
                             </span>
                             <p className="text-sm text-gray-500 truncate">
-                              Chain ID: {chain.id}
+                              {chain.id < 0 ? 'Native testnet' : `Chain ID: ${chain.id}`}
                             </p>
                           </div>
                         </div>

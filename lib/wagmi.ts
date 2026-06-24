@@ -2,7 +2,7 @@
 
 import { getDefaultConfig } from '@rainbow-me/rainbowkit'
 import { metaMaskWallet, injectedWallet, rainbowWallet, walletConnectWallet, coinbaseWallet, trustWallet } from '@rainbow-me/rainbowkit/wallets'
-import { mainnet, telos, base, bsc, arbitrum, polygon, avalanche, optimism, scroll, mantle, linea, sei, kava, metis, aurora, gnosis } from 'wagmi/chains'
+import { mainnet, telos, telosTestnet, base, bsc, arbitrum, polygon, avalanche, optimism, scroll, mantle, linea, sei, kava, metis, aurora, gnosis } from 'wagmi/chains'
 import { http } from 'wagmi'
 import type { Chain } from 'wagmi/chains'
 import { CHAIN_RPC_URLS } from '@/lib/rpcs'
@@ -13,6 +13,17 @@ const telosWithRpc = {
   rpcUrls: {
     default: { http: ['https://rpc.telos.net/evm'] },
     public: { http: ['https://rpc.telos.net/evm'] },
+  },
+  iconUrl: '/chains/telos.png',
+  iconBackground: '#00F2FE',
+} as const
+
+const telosTestnetWithRpc = {
+  ...telosTestnet,
+  name: 'Telos EVM Testnet',
+  rpcUrls: {
+    default: { http: [process.env.NEXT_PUBLIC_TELOS_TESTNET_RPC || 'https://rpc.testnet.telos.net'] },
+    public: { http: [process.env.NEXT_PUBLIC_TELOS_TESTNET_RPC || 'https://rpc.testnet.telos.net'] },
   },
   iconUrl: '/chains/telos.png',
   iconBackground: '#00F2FE',
@@ -166,7 +177,7 @@ export const config = getDefaultConfig({
     { groupName: 'Popular', wallets: [metaMaskWallet, injectedWallet, rainbowWallet] },
     { groupName: 'More', wallets: [walletConnectWallet, coinbaseWallet, trustWallet] },
   ],
-  chains: [telosWithRpc, mainnet, base, bsc, arbitrum, polygon, avalanche, optimism, scroll, mantle, linea, sei, kava, kaia, metis, aurora, gnosis, core, taiko, manta, rootstock, iotaEvm, flare, berachain, degenChain, story, lightlink, apechain, sonic, gravity, flowEvm, xdc, vana],
+  chains: [telosTestnetWithRpc, telosWithRpc, mainnet, base, bsc, arbitrum, polygon, avalanche, optimism, scroll, mantle, linea, sei, kava, kaia, metis, aurora, gnosis, core, taiko, manta, rootstock, iotaEvm, flare, berachain, degenChain, story, lightlink, apechain, sonic, gravity, flowEvm, xdc, vana],
   transports,
   ssr: true,
 })

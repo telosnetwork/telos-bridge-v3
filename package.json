@@ -21,6 +21,8 @@
     "@tanstack/react-query": "^5.90.21",
     "@types/node": "^25.2.3",
     "@types/react": "^19.2.14",
+    "anchor-link": "^3.6.0",
+    "anchor-link-browser-transport": "^3.6.1",
     "autoprefixer": "^10.4.24",
     "next": "^15.5.15",
     "postcss": "^8.5.6",

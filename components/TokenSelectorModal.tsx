@@ -7,6 +7,7 @@ interface TokenSelectorModalProps {
   selectedToken: string
   tokens: string[]
   onTokenChange: (token: string) => void
+  getDisplayToken?: (token: string) => string
 }
 
 const TOKEN_LOGOS = TOKEN_ICONS
@@ -18,26 +19,31 @@ const TOKEN_INFO: Record<string, { name: string; description: string; category: 
   ETH: { name: 'Ethereum', description: 'Native Ethereum token', category: 'Native' },
   WBTC: { name: 'Wrapped Bitcoin', description: 'Bitcoin on Ethereum', category: 'Wrapped' },
   MST: { name: 'Meridian MST', description: ' Meridian Star Token on Telos', category: 'Gaming' },
+  EMPIRES: { name: 'Empires', description: 'Telos Zero test asset', category: 'Gaming' },
 }
 
 const TOKEN_COLORS: Record<string, string> = {
   TLOS: '#00F2FE',
   USDC: '#2775CA',
-  USDT: '#26A17B', 
+  USDT: '#26A17B',
   ETH: '#627EEA',
   WBTC: '#F7931A',
   MST: '#8B5CF6',
+  EMPIRES: '#A855F7',
 }
 
-export function TokenSelectorModal({ selectedToken, tokens, onTokenChange }: TokenSelectorModalProps) {
+export function TokenSelectorModal({ selectedToken, tokens, onTokenChange, getDisplayToken }: TokenSelectorModalProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const modalRef = useRef<HTMLDivElement>(null)
-  
+  const selectedDisplayToken = getDisplayToken?.(selectedToken) ?? selectedToken
+
   const filteredTokens = tokens.filter(token => {
     const info = TOKEN_INFO[token]
+    const displayToken = getDisplayToken?.(token) ?? token
     const searchLower = searchQuery.toLowerCase()
     return token.toLowerCase().includes(searchLower) ||
+           displayToken.toLowerCase().includes(searchLower) ||
            info?.name.toLowerCase().includes(searchLower) ||
            info?.description.toLowerCase().includes(searchLower)
   })
@@ -87,13 +93,13 @@ export function TokenSelectorModal({ selectedToken, tokens, onTokenChange }: Tok
     return (
       <div className="flex items-center gap-2.5 bg-gradient-to-br from-[#252535] to-[#1e1e2e] border border-gray-700/50 rounded-xl px-4 py-3">
         {TOKEN_LOGOS[selectedToken] && (
-          <img 
-            src={TOKEN_LOGOS[selectedToken]} 
-            alt={selectedToken} 
-            className="w-6 h-6 rounded-full" 
+          <img
+            src={TOKEN_LOGOS[selectedToken]}
+            alt={selectedDisplayToken}
+            className="w-6 h-6 rounded-full"
           />
         )}
-        <span className="text-base font-semibold text-white">{selectedToken}</span>
+        <span className="text-base font-semibold text-white">{selectedDisplayToken}</span>
       </div>
     )
   }
@@ -106,26 +112,26 @@ export function TokenSelectorModal({ selectedToken, tokens, onTokenChange }: Tok
         className="shrink-0 flex items-center gap-2.5 bg-gradient-to-br from-[#252535] to-[#1e1e2e] border border-gray-700/50 rounded-xl px-4 py-3 hover:border-gray-600/70 transition-all duration-200 group"
       >
         {TOKEN_LOGOS[selectedToken] && (
-          <img 
-            src={TOKEN_LOGOS[selectedToken]} 
-            alt={selectedToken} 
-            className="w-6 h-6 rounded-full group-hover:scale-110 transition-transform duration-200" 
+          <img
+            src={TOKEN_LOGOS[selectedToken]}
+            alt={selectedDisplayToken}
+            className="w-6 h-6 rounded-full group-hover:scale-110 transition-transform duration-200"
           />
         )}
-        
+
         <span className="text-base font-semibold text-white group-hover:text-gray-200 transition-colors">
-          {selectedToken}
+          {selectedDisplayToken}
         </span>
-        
-        <svg 
-          className="w-3.5 h-3.5 text-gray-500 group-hover:text-gray-400 transition-all duration-200 group-hover:rotate-180" 
-          viewBox="0 0 12 12" 
+
+        <svg
+          className="w-3.5 h-3.5 text-gray-500 group-hover:text-gray-400 transition-all duration-200 group-hover:rotate-180"
+          viewBox="0 0 12 12"
           fill="none"
         >
-          <path 
-            d="M3 5l3 3 3-3" 
-            stroke="currentColor" 
-            strokeWidth="1.5" 
+          <path
+            d="M3 5l3 3 3-3"
+            stroke="currentColor"
+            strokeWidth="1.5"
             strokeLinecap="round"
           />
         </svg>
@@ -138,7 +144,7 @@ export function TokenSelectorModal({ selectedToken, tokens, onTokenChange }: Tok
             {/* Header */}
             <div className="flex items-center justify-between mb-4 sm:mb-6">
               <h3 className="text-xl font-bold text-white">Select Token</h3>
-              <button 
+              <button
                 onClick={() => setIsOpen(false)}
                 className="w-8 h-8 rounded-full bg-gray-800/50 hover:bg-gray-700/50 flex items-center justify-center text-gray-400 hover:text-white transition-all"
               >
@@ -151,10 +157,10 @@ export function TokenSelectorModal({ selectedToken, tokens, onTokenChange }: Tok
 
             {/* Search */}
             <div className="relative mb-6">
-              <svg 
+              <svg
                 className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500"
-                fill="none" 
-                stroke="currentColor" 
+                fill="none"
+                stroke="currentColor"
                 viewBox="0 0 24 24"
               >
                 <circle cx="11" cy="11" r="8"/>
@@ -192,38 +198,42 @@ export function TokenSelectorModal({ selectedToken, tokens, onTokenChange }: Tok
                           const isSelected = token === selectedToken
                           const info = TOKEN_INFO[token]
                           const brandColor = TOKEN_COLORS[token] || '#666'
-                          
+                          const displayToken = getDisplayToken?.(token) ?? token
+
                           return (
                             <button
                               key={token}
                               onClick={() => handleTokenSelect(token)}
                               className={`w-full p-3 rounded-xl border transition-all duration-200 text-left group ${
-                                isSelected 
-                                  ? 'bg-telos-cyan/10 border-telos-cyan/50 ring-2 ring-telos-cyan/30' 
+                                isSelected
+                                  ? 'bg-telos-cyan/10 border-telos-cyan/50 ring-2 ring-telos-cyan/30'
                                   : 'bg-[#1a1a28] border-gray-700/30 hover:border-gray-600/50 hover:bg-[#1e1e30]'
                               }`}
                             >
                               <div className="flex items-center gap-3">
-                                <div 
+                                <div
                                   className="w-10 h-10 rounded-full overflow-hidden flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200"
                                   style={{ background: `${brandColor}15` }}
                                 >
                                   {TOKEN_LOGOS[token] && (
-                                    <img 
-                                      src={TOKEN_LOGOS[token]} 
-                                      alt={token}
-                                      className="w-6 h-6 group-hover:scale-110 transition-transform duration-200" 
+                                    <img
+                                      src={TOKEN_LOGOS[token]}
+                                      alt={displayToken}
+                                      className="w-6 h-6 group-hover:scale-110 transition-transform duration-200"
                                     />
                                   )}
                                 </div>
-                                
+
                                 <div className="flex-1 min-w-0">
                                   <div>
                                     <span className={`font-semibold transition-colors ${
                                       isSelected ? 'text-telos-cyan' : 'text-white group-hover:text-gray-200'
                                     }`}>
-                                      {token}
+                                      {displayToken}
                                     </span>
+                                    {displayToken !== token && (
+                                      <span className="ml-2 text-xs font-medium text-gray-500">{token}</span>
+                                    )}
                                     {info && (
                                       <>
                                         <p className="text-sm text-gray-400">{info.name}</p>

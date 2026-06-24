@@ -1,14 +1,17 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAccount, useBalance, useSwitchChain, useWalletClient, usePublicClient, useReadContract } from 'wagmi'
-import { createPublicClient, formatUnits, http } from 'viem'
+import { createPublicClient, formatUnits, http, isAddress, parseEther, type Address } from 'viem'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
-import { SUPPORTED_CHAINS, CHAIN_MAP } from '@/lib/chains'
+import { SUPPORTED_CHAINS, CHAIN_MAP, TELOS_EVM_TESTNET_CHAIN_ID, TELOS_ZERO_TESTNET_CHAIN_ID, isTelosZeroChain } from '@/lib/chains'
 import { TOKEN_ICONS } from '@/lib/constants'
 import { CHAIN_RPC_URLS } from '@/lib/rpcs'
 import { isTlosOftRoute, quoteOftSend, executeOftSend, isMstOftRoute, quoteMstSend, executeMstSend, getMstSupportedChains, TLOS_OFT_ADDRESSES, MST_OFT_ADDRESSES, type OftQuoteResult } from '@/lib/oft'
 import { isOftV2Route, getAvailableOftV2Tokens, quoteOftV2Send, executeOftV2Send, OFT_V2_TOKENS, type OftV2QuoteResult } from '@/lib/oft-v2'
+import { executeZeroBridgeSend, executeZeroToEvmBridgeSend, getZeroBridgeBalance, getZeroBridgeChainsForToken, getZeroBridgeProcessedRequest, getZeroBridgeReceiveSymbol, getZeroBridgeSendSymbol, getZeroBridgeTestMintAmount, getZeroBridgeTokenAddress, getZeroBridgeTokens, hasZeroBridgeConfig, isZeroBridgeEvmToZeroRoute, isZeroBridgeRoute, isZeroBridgeZeroToEvmRoute, mintZeroBridgeTestToken, quoteZeroBridgeSend, type ZeroBridgeQuoteResult } from '@/lib/zero-route'
+import { buildZeroNativeTlosTransfer, executeZeroNativeTlosTransfer, formatEvmTlosBalance, getEvmTlosBalanceWei, getZeroNativeTlosChainsForToken, getZeroNativeTlosTokens, getZeroTlosBalance, isValidZeroAccountName, isZeroNativeTlosRoute, quoteZeroNativeTlosSend, type ZeroNativeTlosQuoteResult } from '@/lib/zero-native-tlos'
+import { connectZeroSigner, type ZeroSignerAccount } from '@/lib/zero-signer'
 import { AmountInput } from './AmountInput'
 import { ChainSelectorModal } from './ChainSelectorModal'
 import { TokenSelectorModal } from './TokenSelectorModal'
@@ -95,18 +98,18 @@ const CANONICAL_TOKENS: Record<string, Record<number, string>> = {
 // Get canonical token address for balance checking
 function getCanonicalTokenAddress(token: string, chainId: number): string | undefined {
   if (token === 'TLOS') return getTokenAddress(token, chainId)
-  
+
   // ETH is native on most chains - only check ERC20 on Telos
   if (token === 'ETH') {
     if (chainId === 40) return CANONICAL_TOKENS['ETH']?.[40]
     return undefined // Use native balance on other chains
   }
-  
+
   // Check canonical mapping first
   if (CANONICAL_TOKENS[token]?.[chainId]) {
     return CANONICAL_TOKENS[token][chainId]
   }
-  
+
   // Fall back to OFT address (for chains not in canonical map)
   return getTokenAddress(token, chainId)
 }
@@ -184,54 +187,94 @@ export function BridgeForm() {
   const { switchChainAsync } = useSwitchChain()
   const { data: walletClient } = useWalletClient()
   const { reduceMotion } = useAnimation()
-  const [fromChain, setFromChain] = useState(40)
-  const [toChain, setToChain] = useState(8453)
-  const [token, setToken] = useState('TLOS')
+  const [fromChain, setFromChain] = useState(TELOS_EVM_TESTNET_CHAIN_ID)
+  const [toChain, setToChain] = useState(TELOS_ZERO_TESTNET_CHAIN_ID)
+  const [token, setToken] = useState('USDC')
   const [amount, setAmount] = useState('')
+  const [zeroReceiver, setZeroReceiver] = useState('')
+  const [zeroSender, setZeroSender] = useState('')
+  const [evmReceiver, setEvmReceiver] = useState('')
+  const [zeroTlosBalance, setZeroTlosBalance] = useState<string | undefined>()
+  const [zeroBridgeBalance, setZeroBridgeBalance] = useState<string | undefined>()
+  const [zeroSigner, setZeroSigner] = useState<ZeroSignerAccount | null>(null)
+  const [connectingZeroSigner, setConnectingZeroSigner] = useState(false)
   const [slippage, setSlippage] = useState(0.5)
   const [showSettings, setShowSettings] = useState(false)
 
   const [quoting, setQuoting] = useState(false)
   const [oftQuote, setOftQuote] = useState<OftQuoteResult | null>(null)
   const [v2Quote, setV2Quote] = useState<OftV2QuoteResult | null>(null)
+  const [zeroQuote, setZeroQuote] = useState<ZeroBridgeQuoteResult | null>(null)
+  const [zeroNativeQuote, setZeroNativeQuote] = useState<ZeroNativeTlosQuoteResult | null>(null)
   const [error, setError] = useState<ErrorInfo | null>(null)
   const [bridging, setBridging] = useState(false)
   const [bridgeStatus, setBridgeStatus] = useState<string | null>(null)
   const [transactionStep, setTransactionStep] = useState<TransactionStep>('idle')
   const [transactionHash, setTransactionHash] = useState<string | undefined>()
+  const [zeroRequestHash, setZeroRequestHash] = useState<`0x${string}` | undefined>()
   const [currentTransactionId, setCurrentTransactionId] = useState<string | undefined>()
   const [showRecentTransactions, setShowRecentTransactions] = useState(false)
   const [showSuccessCelebration, setShowSuccessCelebration] = useState(false)
-  const wagmiPublicClient = usePublicClient({ chainId: fromChain })
+  const [mintingTestToken, setMintingTestToken] = useState(false)
+  const [testMintStatus, setTestMintStatus] = useState<string | null>(null)
+  const [zeroNativePending, setZeroNativePending] = useState<{
+    receiver: Address
+    baselineWei: bigint
+    expectedWei: bigint
+  } | null>(null)
+  const [zeroToEvmPending, setZeroToEvmPending] = useState<{
+    receiver: Address
+    tokenAddress: Address
+    baselineRaw: bigint
+    expectedRaw: bigint
+    symbol: string
+  } | null>(null)
+  const sourceEvmChainId = isTelosZeroChain(fromChain) ? undefined : fromChain
+  const wagmiPublicClient = usePublicClient({ chainId: sourceEvmChainId })
   // Fallback: create a direct viem client if wagmi hasn't hydrated yet
-  const publicClient = wagmiPublicClient ?? (CHAIN_RPC_URLS[fromChain] ? createPublicClient({
-    transport: http(CHAIN_RPC_URLS[fromChain]),
+  const publicClient = wagmiPublicClient ?? (sourceEvmChainId && CHAIN_RPC_URLS[sourceEvmChainId] ? createPublicClient({
+    transport: http(CHAIN_RPC_URLS[sourceEvmChainId]),
   }) : undefined)
   const quoteTimeout = useRef<NodeJS.Timeout | null>(null)
 
-  const { data: nativeBalance } = useBalance({ address, chainId: fromChain })
+  const { data: nativeBalance } = useBalance({
+    address,
+    chainId: sourceEvmChainId,
+    query: { enabled: Boolean(address && sourceEvmChainId) },
+  })
 
-  const isNativeToken = (token === 'TLOS' && fromChain === 40) || (token === 'ETH' && fromChain !== 40)
+  const isNativeToken = (token === 'TLOS' && fromChain === 40) || (token === 'ETH' && Boolean(sourceEvmChainId) && fromChain !== 40)
+  const isZeroEvmToZeroRoute = isZeroBridgeEvmToZeroRoute(token, fromChain, toChain)
+  const isZeroToEvmRoute = isZeroBridgeZeroToEvmRoute(token, fromChain, toChain)
+  const isZeroRoute = isZeroBridgeRoute(token, fromChain, toChain)
+  const isZeroNativeTlos = isZeroNativeTlosRoute(token, fromChain, toChain)
+  const isZeroSignedRoute = isZeroNativeTlos || isZeroToEvmRoute
+  const zeroRouteConfigured = !isZeroRoute || hasZeroBridgeConfig(token)
+  const zeroToEvmPublicClient = useMemo(() => {
+    if (!isZeroSignedRoute) return undefined
+    const rpcUrl = CHAIN_RPC_URLS[TELOS_EVM_TESTNET_CHAIN_ID]
+    return rpcUrl ? createPublicClient({ transport: http(rpcUrl) }) : undefined
+  }, [isZeroSignedRoute])
 
   // Get ERC20 token address for the selected token on fromChain
-  const tokenAddress = getCanonicalTokenAddress(token, fromChain)
+  const tokenAddress = isZeroEvmToZeroRoute ? getZeroBridgeTokenAddress(token) : getCanonicalTokenAddress(token, fromChain)
 
   // Fetch ERC20 balance when the selected asset is not the native coin on this chain.
-  const { data: erc20BalanceData } = useReadContract({
+  const { data: erc20BalanceData, refetch: refetchErc20Balance } = useReadContract({
     address: tokenAddress as `0x${string}`,
     abi: ERC20_ABI,
     functionName: 'balanceOf',
-    chainId: fromChain,
+    chainId: sourceEvmChainId,
     args: address ? [address] : undefined,
-    query: { enabled: !!address && !!tokenAddress && !isNativeToken }
+    query: { enabled: !!address && !!sourceEvmChainId && !!tokenAddress && !isNativeToken }
   })
 
   const { data: erc20Decimals } = useReadContract({
     address: tokenAddress as `0x${string}`,
     abi: ERC20_ABI,
     functionName: 'decimals',
-    chainId: fromChain,
-    query: { enabled: !!tokenAddress && !isNativeToken }
+    chainId: sourceEvmChainId,
+    query: { enabled: !!sourceEvmChainId && !!tokenAddress && !isNativeToken }
   })
 
   // Combine native and ERC20 balance
@@ -239,8 +282,26 @@ export function BridgeForm() {
   // For ETH on non-Telos chains: use native balance (ETH is native)
   // For ERC20 tokens: use ERC20 balance
   let displayBalance = isNativeToken ? nativeBalance : undefined
-  
-  if (!isNativeToken && erc20BalanceData !== undefined && erc20Decimals !== undefined) {
+
+  if (isZeroNativeTlos && zeroTlosBalance !== undefined) {
+    displayBalance = {
+      formatted: zeroTlosBalance,
+      value: BigInt(0),
+      decimals: 4,
+      symbol: 'TLOS',
+    } as any
+  }
+
+  if (isZeroToEvmRoute && zeroBridgeBalance !== undefined) {
+    displayBalance = {
+      formatted: zeroBridgeBalance,
+      value: BigInt(0),
+      decimals: 0,
+      symbol: getZeroBridgeReceiveSymbol(token, fromChain, toChain) ?? token,
+    } as any
+  }
+
+  if (!isZeroSignedRoute && !isNativeToken && erc20BalanceData !== undefined && erc20Decimals !== undefined) {
     const bal = BigInt(erc20BalanceData as any)
     const dec = Number(erc20Decimals)
     displayBalance = {
@@ -258,24 +319,30 @@ export function BridgeForm() {
     } as any
   }
 
-  const isOft = isTlosOftRoute(fromChain, toChain, token, token)
-  const isMst = isMstOftRoute(fromChain, toChain, token, token)
-  const isV2 = !isOft && !isMst && isOftV2Route(token, fromChain, toChain)
-  const hasQuote = !!(oftQuote || v2Quote)
-  const wrongNetwork = address && walletChainId !== fromChain
+  const isOft = !isZeroRoute && !isZeroNativeTlos && isTlosOftRoute(fromChain, toChain, token, token)
+  const isMst = !isZeroRoute && !isZeroNativeTlos && isMstOftRoute(fromChain, toChain, token, token)
+  const isV2 = !isZeroRoute && !isZeroNativeTlos && !isOft && !isMst && isOftV2Route(token, fromChain, toChain)
+  const hasQuote = !!(oftQuote || v2Quote || zeroQuote || zeroNativeQuote)
+  const wrongNetwork = Boolean(!isZeroSignedRoute && address && sourceEvmChainId && walletChainId !== sourceEvmChainId)
 
   const chainName = (id: number) => getChainLabel(id)
   const chainIcon = (id: number) => CHAIN_MAP.get(id)?.icon
 
   // Check for insufficient balance
-  const insufficientBalance = !!(address && displayBalance && amount && parseFloat(amount) > parseFloat(displayBalance.formatted))
+  const insufficientBalance = !!((address || isZeroSignedRoute) && displayBalance && amount && parseFloat(amount) > parseFloat(displayBalance.formatted))
   const routeLabel = isMst
     ? 'MST OFT V1'
     : isOft
       ? 'TLOS OFT V1'
-      : isV2
-        ? 'OFT V2'
-        : 'Unsupported or unknown route'
+      : isZeroNativeTlos
+        ? 'Telos Zero -> Telos EVM TLOS'
+        : isZeroToEvmRoute
+          ? 'Telos Zero -> Telos EVM'
+          : isZeroEvmToZeroRoute
+            ? 'Telos EVM -> Telos Zero'
+            : isV2
+              ? 'OFT V2'
+              : 'Unsupported or unknown route'
   const issueReportUrl = buildIssueReportUrl({
     token,
     fromChain,
@@ -285,6 +352,8 @@ export function BridgeForm() {
     routeLabel,
     error,
   })
+  const sendTokenSymbol = isZeroRoute ? getZeroBridgeSendSymbol(token, fromChain, toChain) ?? token : token
+  const receiveTokenSymbol = isZeroRoute ? getZeroBridgeReceiveSymbol(token, fromChain, toChain) ?? token : token
 
   // Get chains that support the selected token
   const getChainsForToken = useCallback((tok: string) => {
@@ -302,6 +371,8 @@ export function BridgeForm() {
       chainIds.add(40) // Telos always
       Object.keys(OFT_V2_TOKENS[tok].peers).forEach(id => chainIds.add(Number(id)))
     }
+    getZeroNativeTlosChainsForToken(tok).forEach(id => chainIds.add(id))
+    getZeroBridgeChainsForToken(tok).forEach(id => chainIds.add(id))
     return SUPPORTED_CHAINS.filter(c => chainIds.has(c.id))
   }, [])
 
@@ -309,6 +380,12 @@ export function BridgeForm() {
 
   // Build token list: TLOS (always) + V2 OFT tokens available for this route
   const availableTokens = useCallback(() => {
+    const zeroNativeTokens = getZeroNativeTlosTokens(fromChain, toChain)
+    if (zeroNativeTokens.length) return zeroNativeTokens
+
+    const zeroTokens = getZeroBridgeTokens(fromChain, toChain)
+    if (zeroTokens.length) return zeroTokens
+
     const tokens = ['TLOS']
     const mstChains = getMstSupportedChains()
     if (mstChains.includes(fromChain) && mstChains.includes(toChain)) {
@@ -323,8 +400,58 @@ export function BridgeForm() {
 
   // Reset token if not available on new route
   useEffect(() => {
-    if (!tokenList.includes(token)) setToken('TLOS')
+    if (!tokenList.includes(token)) setToken(tokenList[0] || 'TLOS')
   }, [tokenList, token])
+
+  useEffect(() => {
+    if (!isZeroNativeTlos || !isValidZeroAccountName(zeroSender)) {
+      setZeroTlosBalance(undefined)
+      return
+    }
+
+    let cancelled = false
+    const timeoutId = setTimeout(async () => {
+      try {
+        const balance = await getZeroTlosBalance(zeroSender)
+        if (!cancelled) setZeroTlosBalance(balance)
+      } catch {
+        if (!cancelled) setZeroTlosBalance(undefined)
+      }
+    }, 350)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timeoutId)
+    }
+  }, [isZeroNativeTlos, zeroSender])
+
+  useEffect(() => {
+    if (!isZeroToEvmRoute || !isValidZeroAccountName(zeroSender)) {
+      setZeroBridgeBalance(undefined)
+      return
+    }
+
+    let cancelled = false
+    const timeoutId = setTimeout(async () => {
+      try {
+        const balance = await getZeroBridgeBalance(token, zeroSender)
+        if (!cancelled) setZeroBridgeBalance(balance)
+      } catch {
+        if (!cancelled) setZeroBridgeBalance(undefined)
+      }
+    }, 350)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timeoutId)
+    }
+  }, [isZeroToEvmRoute, token, zeroSender])
+
+  useEffect(() => {
+    if (isZeroSignedRoute && address && !evmReceiver) {
+      setEvmReceiver(address)
+    }
+  }, [isZeroSignedRoute, address, evmReceiver])
 
   // Reset chains if not valid for selected token
   useEffect(() => {
@@ -336,50 +463,65 @@ export function BridgeForm() {
       const other = validIds.find(id => id !== fromChain)
       if (other) setToChain(other)
     }
-  }, [token, filteredChains])
+  }, [token, filteredChains, fromChain])
 
-  const clearQuotes = () => { 
-    setOftQuote(null); setV2Quote(null); setError(null); setBridgeStatus(null);
-    setTransactionStep('idle'); setTransactionHash(undefined); setCurrentTransactionId(undefined);
+  const clearQuotes = () => {
+    setOftQuote(null); setV2Quote(null); setZeroQuote(null); setZeroNativeQuote(null); setError(null); setBridgeStatus(null);
+    setTransactionStep('idle'); setTransactionHash(undefined); setZeroRequestHash(undefined); setCurrentTransactionId(undefined);
+    setZeroNativePending(null); setZeroToEvmPending(null);
     setShowSuccessCelebration(false);
   }
 
   const doQuote = useCallback(async () => {
-    if (!amount || parseFloat(amount) <= 0 || !publicClient) return
-    setQuoting(true); setError(null); setOftQuote(null); setV2Quote(null)
+    if (!amount || parseFloat(amount) <= 0 || (!publicClient && !isZeroRoute && !isZeroNativeTlos)) return
+    if (isZeroEvmToZeroRoute && !zeroReceiver.trim()) return
+    if (isZeroSignedRoute && (!isValidZeroAccountName(zeroSender) || !isAddress(evmReceiver))) return
+    setQuoting(true); setError(null); setOftQuote(null); setV2Quote(null); setZeroQuote(null); setZeroNativeQuote(null)
     try {
-      if (isOft) {
+      if (isZeroNativeTlos) {
+        setZeroNativeQuote(quoteZeroNativeTlosSend(amount))
+      } else if (isZeroRoute) {
+        if (!zeroRouteConfigured) {
+          throw new Error('Missing Telos Zero bridge testnet configuration')
+        }
+        setZeroQuote(quoteZeroBridgeSend(token, amount, isZeroToEvmRoute ? 'zero-to-evm' : 'evm-to-zero'))
+      } else if (isOft && publicClient) {
         const oq = await quoteOftSend(publicClient, fromChain, toChain, amount,
           address || '0x0000000000000000000000000000000000000001' as `0x${string}`)
         setOftQuote(oq)
-      } else if (isMst) {
+      } else if (isMst && publicClient) {
         const mq = await quoteMstSend(publicClient, fromChain, toChain, amount,
           address || '0x0000000000000000000000000000000000000001' as `0x${string}`)
         setOftQuote(mq)
-      } else if (isV2) {
+      } else if (isV2 && publicClient) {
         const vq = await quoteOftV2Send(publicClient, token, fromChain, toChain, amount,
           address || '0x0000000000000000000000000000000000000001' as `0x${string}`)
         setV2Quote(vq)
       } else {
-        setError(createError('unsupported_route', `${token} cannot be bridged on this route`, 
+        setError(createError('unsupported_route', `${token} cannot be bridged on this route`,
           `No available bridge routes found for ${token} from ${chainName(fromChain)} to ${chainName(toChain)}`))
       }
     } catch (e: any) {
       const message = e.message || 'Failed to get quote'
       setError(createError('quote_failed', 'Unable to get bridge quote', message))
     } finally { setQuoting(false) }
-  }, [fromChain, toChain, token, amount, address, publicClient, isOft, isMst, isV2])
+  }, [fromChain, toChain, token, amount, address, publicClient, isOft, isMst, isV2, isZeroRoute, isZeroEvmToZeroRoute, isZeroToEvmRoute, isZeroSignedRoute, isZeroNativeTlos, zeroRouteConfigured, zeroReceiver, zeroSender, evmReceiver])
 
   // Auto-quote with debounce
   useEffect(() => {
     if (quoteTimeout.current) clearTimeout(quoteTimeout.current)
-    setOftQuote(null); setV2Quote(null)
+    setOftQuote(null); setV2Quote(null); setZeroQuote(null)
     if (!amount || parseFloat(amount) <= 0) return
+    if (isZeroEvmToZeroRoute && !zeroReceiver.trim()) return
+    if (isZeroSignedRoute && (!isValidZeroAccountName(zeroSender) || !isAddress(evmReceiver))) return
     quoteTimeout.current = setTimeout(() => doQuote(), 800)
     return () => { if (quoteTimeout.current) clearTimeout(quoteTimeout.current) }
-  }, [amount, fromChain, toChain, token])
+  }, [amount, fromChain, toChain, token, zeroReceiver, zeroSender, evmReceiver, isZeroEvmToZeroRoute, isZeroSignedRoute, doQuote])
 
   useEffect(() => {
+    if (isTelosZeroChain(fromChain) || isTelosZeroChain(toChain)) {
+      return
+    }
     if (!transactionHash || !currentTransactionId || transactionStep === 'idle' || transactionStep === 'completed') {
       return
     }
@@ -466,27 +608,332 @@ export function BridgeForm() {
       controller?.abort()
       if (timeoutId) clearTimeout(timeoutId)
     }
-  }, [transactionHash, currentTransactionId, transactionStep, toChain])
+  }, [transactionHash, currentTransactionId, transactionStep, fromChain, toChain])
+
+  useEffect(() => {
+    if (!isZeroEvmToZeroRoute || !zeroRequestHash || !currentTransactionId || transactionStep !== 'bridging') {
+      return
+    }
+
+    let cancelled = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+    const scheduleNextPoll = () => {
+      if (!cancelled) {
+        timeoutId = setTimeout(pollZeroStatus, 5000)
+      }
+    }
+
+    const pollZeroStatus = async () => {
+      try {
+        const processedRequest = await getZeroBridgeProcessedRequest(zeroRequestHash)
+
+        if (cancelled) return
+
+        if (processedRequest) {
+          setBridgeStatus(`${processedRequest.quantity} minted to ${processedRequest.receiver} on Telos Zero.`)
+          setTransactionStep('completed')
+          setShowSuccessCelebration(true)
+          updateTransaction(currentTransactionId, {
+            status: 'completed',
+          })
+          return
+        }
+      } catch {
+        // Keep polling. Temporary RPC or API failures should not strand the visible progress state.
+      }
+
+      scheduleNextPoll()
+    }
+
+    pollZeroStatus()
+
+    return () => {
+      cancelled = true
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [isZeroEvmToZeroRoute, zeroRequestHash, currentTransactionId, transactionStep])
+
+  useEffect(() => {
+    if (!isZeroNativeTlos || !zeroToEvmPublicClient || !zeroNativePending || !currentTransactionId) {
+      return
+    }
+    if (transactionStep !== 'confirming' && transactionStep !== 'bridging') {
+      return
+    }
+
+    let cancelled = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+    const scheduleNextPoll = () => {
+      if (!cancelled) {
+        timeoutId = setTimeout(pollEvmBalance, 5000)
+      }
+    }
+
+    const pollEvmBalance = async () => {
+      try {
+        const balanceWei = await getEvmTlosBalanceWei(zeroToEvmPublicClient, zeroNativePending.receiver)
+        if (cancelled) return
+
+        if (balanceWei >= zeroNativePending.baselineWei + zeroNativePending.expectedWei) {
+          setBridgeStatus(`${formatEvmTlosBalance(balanceWei)} TLOS available on Telos EVM.`)
+          setTransactionStep('completed')
+          setShowSuccessCelebration(true)
+          updateTransaction(currentTransactionId, { status: 'completed' })
+          return
+        }
+
+        setTransactionStep((current) => current === 'confirming' ? 'bridging' : current)
+      } catch {
+        // Keep polling through short-lived EVM RPC errors.
+      }
+
+      scheduleNextPoll()
+    }
+
+    pollEvmBalance()
+
+    return () => {
+      cancelled = true
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [isZeroNativeTlos, zeroToEvmPublicClient, zeroNativePending, currentTransactionId, transactionStep])
+
+  useEffect(() => {
+    if (!isZeroToEvmRoute || !zeroToEvmPublicClient || !zeroToEvmPending || !currentTransactionId) {
+      return
+    }
+    if (transactionStep !== 'confirming' && transactionStep !== 'bridging') {
+      return
+    }
+
+    let cancelled = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+    const scheduleNextPoll = () => {
+      if (!cancelled) {
+        timeoutId = setTimeout(pollEvmTokenBalance, 5000)
+      }
+    }
+
+    const pollEvmTokenBalance = async () => {
+      try {
+        const balance = await zeroToEvmPublicClient.readContract({
+          address: zeroToEvmPending.tokenAddress,
+          abi: ERC20_ABI,
+          functionName: 'balanceOf',
+          args: [zeroToEvmPending.receiver],
+        }) as bigint
+        if (cancelled) return
+
+        if (balance >= zeroToEvmPending.baselineRaw + zeroToEvmPending.expectedRaw) {
+          setBridgeStatus(`${zeroToEvmPending.symbol} released on Telos EVM.`)
+          setTransactionStep('completed')
+          setShowSuccessCelebration(true)
+          updateTransaction(currentTransactionId, { status: 'completed' })
+          return
+        }
+
+        setTransactionStep((current) => current === 'confirming' ? 'bridging' : current)
+      } catch {
+        // Keep polling through short-lived EVM RPC errors.
+      }
+
+      scheduleNextPoll()
+    }
+
+    pollEvmTokenBalance()
+
+    return () => {
+      cancelled = true
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [isZeroToEvmRoute, zeroToEvmPublicClient, zeroToEvmPending, currentTransactionId, transactionStep])
 
   const handleBridge = useCallback(async () => {
+    if (isZeroNativeTlos) {
+      if (!isValidZeroAccountName(zeroSender)) {
+        setError(createError('quote_failed', 'Enter a Telos Zero sender',
+          'This route starts from a Telos Zero account, so it needs the native account that will sign.'))
+        return
+      }
+      if (!isAddress(evmReceiver)) {
+        setError(createError('quote_failed', 'Enter a Telos EVM receiver',
+          'This route credits native TLOS to a Telos EVM address.'))
+        return
+      }
+      if (!zeroNativeQuote || !zeroToEvmPublicClient) {
+        setError(createError('quote_failed', 'Get a quote first',
+          'A TLOS transfer quote is required before preparing the Zero transaction.'))
+        return
+      }
+
+      setBridging(true); setError(null); setBridgeStatus('Preparing Zero transaction...')
+      setTransactionHash(undefined); setZeroRequestHash(undefined); setZeroNativePending(null)
+      setZeroToEvmPending(null)
+
+      const transaction = addTransaction({
+        fromChain,
+        toChain,
+        token,
+        amount,
+        status: 'pending',
+      })
+      setCurrentTransactionId(transaction.id)
+
+      try {
+        const transfer = buildZeroNativeTlosTransfer({ zeroSender, evmReceiver, amount })
+        const baselineWei = await getEvmTlosBalanceWei(zeroToEvmPublicClient, transfer.evmReceiver)
+
+        setZeroNativePending({
+          receiver: transfer.evmReceiver,
+          baselineWei,
+          expectedWei: parseEther(transfer.amountFormatted),
+        })
+        const result = await executeZeroNativeTlosTransfer({
+          zeroSender,
+          evmReceiver,
+          amount,
+          onStatus: (status, hash) => {
+            setBridgeStatus(status)
+            if (hash) {
+              setTransactionHash(hash)
+              updateTransaction(transaction.id, { txHash: hash })
+            }
+          },
+        })
+        setTransactionHash(result.transactionId)
+        if (result.transactionId) {
+          updateTransaction(transaction.id, { txHash: result.transactionId, status: 'pending' })
+        }
+        setTransactionStep('confirming')
+      } catch (e: any) {
+        const msg = e.message || 'Could not prepare Zero transfer'
+        setError(createError('bridge_failed', 'Zero transfer preparation failed', msg))
+        setBridgeStatus(null)
+        setTransactionStep('idle')
+        updateTransaction(transaction.id, { status: 'failed' })
+      } finally {
+        setBridging(false)
+      }
+      return
+    }
+
+    if (isZeroToEvmRoute) {
+      if (!isValidZeroAccountName(zeroSender)) {
+        setError(createError('quote_failed', 'Enter a Telos Zero sender',
+          'This route starts from a Telos Zero account, so it needs the native account that will sign.'))
+        return
+      }
+      if (!isAddress(evmReceiver)) {
+        setError(createError('quote_failed', 'Enter a Telos EVM receiver',
+          'This route releases the escrowed EVM asset to a Telos EVM address.'))
+        return
+      }
+      const zeroTokenAddress = getZeroBridgeTokenAddress(token)
+      if (!zeroQuote || !zeroToEvmPublicClient || !zeroTokenAddress) {
+        setError(createError('quote_failed', 'Get a quote first',
+          'A Zero-to-EVM bridge quote is required before sending the Zero transaction.'))
+        return
+      }
+      if (displayBalance && parseFloat(amount) > parseFloat(displayBalance.formatted)) {
+        setError(createError('insufficient_balance', `Insufficient ${sendTokenSymbol} balance`,
+          `You need at least ${amount} ${sendTokenSymbol} but only have ${displayBalance.formatted} ${sendTokenSymbol}`))
+        return
+      }
+
+      setBridging(true); setError(null); setBridgeStatus('Preparing Zero transaction...')
+      setTransactionHash(undefined); setZeroRequestHash(undefined); setZeroNativePending(null); setZeroToEvmPending(null)
+
+      const transaction = addTransaction({
+        fromChain,
+        toChain,
+        token,
+        amount,
+        status: 'pending',
+      })
+      setCurrentTransactionId(transaction.id)
+
+      try {
+        const receiver = evmReceiver as Address
+        const baselineRaw = await zeroToEvmPublicClient.readContract({
+          address: zeroTokenAddress,
+          abi: ERC20_ABI,
+          functionName: 'balanceOf',
+          args: [receiver],
+        }) as bigint
+
+        const result = await executeZeroToEvmBridgeSend({
+          token,
+          amount,
+          zeroSender,
+          evmReceiver,
+          onStatus: (status, hash) => {
+            setBridgeStatus(status)
+            if (hash) {
+              setTransactionHash(hash)
+              updateTransaction(transaction.id, { txHash: hash })
+            }
+          },
+        })
+
+        setZeroToEvmPending({
+          receiver: result.evmReceiver,
+          tokenAddress: zeroTokenAddress,
+          baselineRaw,
+          expectedRaw: result.amountRaw,
+          symbol: result.evmSymbol,
+        })
+        setZeroQuote(null)
+        setTransactionHash(result.transactionId)
+        if (result.transactionId) {
+          updateTransaction(transaction.id, { txHash: result.transactionId, status: 'pending' })
+        }
+        setBridgeStatus(`${result.quantity} burn recorded. Awaiting EVM release relay.`)
+        setTransactionStep('bridging')
+        setAmount('')
+      } catch (e: any) {
+        const msg = e.message || 'Zero-to-EVM bridge failed'
+        if (msg.includes('rejected') || msg.includes('denied') || msg.includes('cancelled')) {
+          setError(createError('transaction_rejected', 'Transaction rejected',
+            'You declined the transaction in Anchor'))
+        } else {
+          setError(createError('bridge_failed', 'Bridge transaction failed', msg))
+        }
+        setBridgeStatus(null)
+        setTransactionStep('idle')
+        updateTransaction(transaction.id, { status: 'failed' })
+      } finally {
+        setBridging(false)
+      }
+      return
+    }
+
     if (!address) {
-      setError(createError('wallet_not_connected', 'Connect your wallet first', 
+      setError(createError('wallet_not_connected', 'Connect your wallet first',
         'A wallet connection is required to bridge tokens'))
       return
     }
+    if (isZeroEvmToZeroRoute && !zeroReceiver.trim()) {
+      setError(createError('quote_failed', 'Enter a Telos Zero receiver',
+        'This route mints the fresh asset on Telos Zero, so it needs a native account name as the receiver.'))
+      return
+    }
     if (!hasQuote || !walletClient || !publicClient) {
-      setError(createError('quote_failed', 'Get a quote first', 
+      setError(createError('quote_failed', 'Get a quote first',
         'A bridge quote is required before executing the transaction'))
       return
     }
     if (displayBalance && parseFloat(amount) > parseFloat(displayBalance.formatted)) {
-      setError(createError('insufficient_balance', `Insufficient ${token} balance`, 
-        `You need at least ${amount} ${token} but only have ${displayBalance.formatted} ${token}`))
+      setError(createError('insufficient_balance', `Insufficient ${sendTokenSymbol} balance`,
+        `You need at least ${amount} ${sendTokenSymbol} but only have ${displayBalance.formatted} ${sendTokenSymbol}`))
       return
     }
     setBridging(true); setError(null); setBridgeStatus('Preparing…')
     setTransactionStep('submitted')
     setTransactionHash(undefined)
+    setZeroRequestHash(undefined)
 
     // Create transaction record in localStorage
     const transaction = addTransaction({
@@ -507,14 +954,14 @@ export function BridgeForm() {
       // Clean display status — strip the tracking URL part
       const displayStatus = status.replace(/Track at layerzeroscan\.com\/tx\/\S+/, '').trim()
       setBridgeStatus(displayStatus)
-      
+
       if (extractedHash && !transactionHash) {
         setTransactionHash(extractedHash)
         if (transaction.id) {
           updateTransaction(transaction.id, { txHash: extractedHash })
         }
       }
-      
+
       // Update stepper based on status keywords
       if (status.toLowerCase().includes('confirm')) {
         setTransactionStep('confirming')
@@ -540,11 +987,35 @@ export function BridgeForm() {
     }
 
     try {
-      if (walletChainId !== fromChain) {
+      if (sourceEvmChainId && walletChainId !== sourceEvmChainId) {
         setBridgeStatus('Switching network…')
-        await switchChainAsync({ chainId: fromChain })
+        await switchChainAsync({ chainId: sourceEvmChainId })
       }
-      if (oftQuote && isMst) {
+      if (zeroQuote && isZeroEvmToZeroRoute) {
+        const result = await executeZeroBridgeSend({
+          walletClient,
+          publicClient,
+          token,
+          amount,
+          fromAddress: address as Address,
+          zeroReceiver,
+          onStatus: updateProgress,
+        })
+        setZeroQuote(null)
+        setTransactionHash(result.txHash)
+        setZeroRequestHash(result.requestHash)
+        if (transaction.id) {
+          updateTransaction(transaction.id, { txHash: result.txHash, status: 'pending' })
+        }
+        setBridgeStatus(
+          result.requestId
+            ? `EVM request #${result.requestId} recorded. Awaiting Telos Zero proof relay.`
+            : 'EVM escrow request recorded. Awaiting Telos Zero proof relay.'
+        )
+        setTransactionStep('bridging')
+        setAmount('')
+        return
+      } else if (oftQuote && isMst) {
         await executeMstSend(walletClient, publicClient, fromChain, toChain, amount,
           address, address, updateProgress)
         setOftQuote(null)
@@ -567,7 +1038,7 @@ export function BridgeForm() {
     } catch (e: any) {
       const msg = e.message || 'Bridge failed'
       if (msg.includes('rejected') || msg.includes('denied') || msg.includes('cancelled')) {
-        setError(createError('transaction_rejected', 'Transaction rejected', 
+        setError(createError('transaction_rejected', 'Transaction rejected',
           'You declined the transaction in your wallet'))
       } else if (msg.includes('network') || msg.includes('RPC')) {
         setError(createError('rpc_error', 'Network error', msg))
@@ -581,7 +1052,7 @@ export function BridgeForm() {
         updateTransaction(transaction.id, { status: 'failed' })
       }
     } finally { setBridging(false) }
-  }, [oftQuote, v2Quote, address, walletClient, publicClient, walletChainId, fromChain, toChain, switchChainAsync, amount, slippage, displayBalance, token, isMst])
+  }, [oftQuote, v2Quote, zeroQuote, zeroNativeQuote, address, walletClient, publicClient, zeroToEvmPublicClient, walletChainId, sourceEvmChainId, fromChain, toChain, switchChainAsync, amount, slippage, displayBalance, token, sendTokenSymbol, isMst, isZeroRoute, isZeroEvmToZeroRoute, isZeroToEvmRoute, isZeroSignedRoute, isZeroNativeTlos, zeroReceiver, zeroSender, evmReceiver, hasQuote])
 
   const swap = () => {
     const fc = fromChain
@@ -603,7 +1074,26 @@ export function BridgeForm() {
 
   const handleConnectWallet = () => {
     setError(null)
-    // The connect wallet button in the UI will handle the actual connection
+    openConnectModal?.()
+  }
+
+  const handleConnectZeroSigner = async () => {
+    setConnectingZeroSigner(true)
+    setError(null)
+    try {
+      const signer = await connectZeroSigner()
+      setZeroSigner(signer)
+      if (isZeroSignedRoute) {
+        setZeroSender(signer.actor)
+      } else if (isZeroEvmToZeroRoute) {
+        setZeroReceiver(signer.actor)
+      }
+      clearQuotes()
+    } catch (e: any) {
+      setError(createError('wallet_not_connected', 'Telos Zero wallet not connected', e.message || 'Anchor connection failed'))
+    } finally {
+      setConnectingZeroSigner(false)
+    }
   }
 
   const handleSwitchNetwork = async (chainId: number) => {
@@ -617,6 +1107,50 @@ export function BridgeForm() {
 
   const handleMax = () => { if (displayBalance) setAmount(displayBalance.formatted) }
   const handleHalf = () => { if (displayBalance) setAmount((parseFloat(displayBalance.formatted) / 2).toString()) }
+
+  const handleMintTestToken = useCallback(async () => {
+    if (!address) {
+      openConnectModal?.()
+      return
+    }
+    if (!walletClient || !publicClient) {
+      setError(createError('wallet_not_connected', 'Wallet is not ready', 'Reconnect the wallet and try again.'))
+      return
+    }
+    if (!isZeroEvmToZeroRoute || !getZeroBridgeTestMintAmount(token)) return
+
+    setMintingTestToken(true)
+    setTestMintStatus(null)
+    setError(null)
+
+    try {
+      if (sourceEvmChainId && walletChainId !== sourceEvmChainId) {
+        setTestMintStatus(`Switching to ${chainName(sourceEvmChainId)}...`)
+        await switchChainAsync({ chainId: sourceEvmChainId })
+      }
+
+      const result = await mintZeroBridgeTestToken({
+        walletClient,
+        publicClient,
+        token,
+        toAddress: address as Address,
+        onStatus: setTestMintStatus,
+      })
+
+      setTestMintStatus(`${result.amount} ${result.symbol} minted`)
+      await refetchErc20Balance()
+    } catch (e: any) {
+      const msg = e.message || 'Test token mint failed'
+      setTestMintStatus(null)
+      if (msg.includes('rejected') || msg.includes('denied') || msg.includes('cancelled')) {
+        setError(createError('transaction_rejected', 'Transaction rejected', 'You declined the mint transaction in your wallet.'))
+      } else {
+        setError(createError('bridge_failed', 'Test token mint failed', msg))
+      }
+    } finally {
+      setMintingTestToken(false)
+    }
+  }, [address, openConnectModal, walletClient, publicClient, isZeroEvmToZeroRoute, token, sourceEvmChainId, walletChainId, switchChainAsync, refetchErc20Balance])
 
   const handleFromChain = (id: number) => {
     if (id === toChain) setToChain(fromChain)
@@ -637,9 +1171,9 @@ export function BridgeForm() {
       <div className={`flex justify-end gap-3 sm:gap-3 ${
         reduceMotion ? '' : 'animate-in slide-in-from-right-3 fade-in duration-500 delay-500'
       }`}>
-        <button 
+        <button
           onClick={() => setShowRecentTransactions(true)}
-          className="w-11 h-11 sm:w-9 sm:h-9 rounded-full bg-[#1a1a28]/80 border border-gray-800/50 flex items-center justify-center text-gray-500 hover:text-gray-300 hover:border-gray-600 transition-all active:scale-95" 
+          className="w-11 h-11 sm:w-9 sm:h-9 rounded-full bg-[#1a1a28]/80 border border-gray-800/50 flex items-center justify-center text-gray-500 hover:text-gray-300 hover:border-gray-600 transition-all active:scale-95"
           title="Transaction History"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -669,7 +1203,7 @@ export function BridgeForm() {
 
           {/* Swap button — between the two selectors */}
           <div className="relative z-20 flex items-center justify-center" style={{ marginTop: '-12px', marginBottom: '-12px' }}>
-            <button 
+            <button
               onClick={swap}
               className="w-10 h-10 rounded-full bg-[#1a1a28] border-2 sm:border border-gray-700/50 flex items-center justify-center hover:border-telos-cyan/50 hover:bg-telos-cyan/5 hover:rotate-180 duration-300 text-gray-400 hover:text-telos-cyan shrink-0 group active:scale-95 touch-manipulation shadow-lg shadow-black/50 sm:shadow-none"
             >
@@ -700,7 +1234,7 @@ export function BridgeForm() {
           <AmountInput
             amount={amount}
             onAmountChange={setAmount}
-            token={token}
+            token={sendTokenSymbol}
             balance={displayBalance}
             insufficientBalance={insufficientBalance}
             onMax={handleMax}
@@ -708,13 +1242,121 @@ export function BridgeForm() {
             onQuarter={() => { if (displayBalance) setAmount((parseFloat(displayBalance.formatted) / 4).toString()) }}
             className="flex-1 min-w-0"
           />
-          
-          <TokenSelectorModal 
+
+          <TokenSelectorModal
             selectedToken={token}
             tokens={tokenList}
             onTokenChange={(newToken) => { setToken(newToken); clearQuotes() }}
+            getDisplayToken={(candidate) => (
+              isZeroRoute
+                ? getZeroBridgeSendSymbol(candidate, fromChain, toChain) ?? candidate
+                : candidate
+            )}
           />
         </div>
+
+        {isZeroEvmToZeroRoute && address && getZeroBridgeTestMintAmount(token) && (
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3">
+            <button
+              type="button"
+              onClick={handleMintTestToken}
+              disabled={mintingTestToken || !walletClient || !publicClient}
+              className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-telos-cyan/25 bg-telos-cyan/10 px-3 py-2 text-xs font-semibold text-telos-cyan transition hover:border-telos-cyan/50 hover:bg-telos-cyan/15 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {mintingTestToken ? (
+                <LoadingSpinner size="sm" className="text-telos-cyan" />
+              ) : (
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
+                </svg>
+              )}
+              <span>{mintingTestToken ? 'Minting...' : `Mint test ${token}`}</span>
+            </button>
+            {testMintStatus && (
+              <span className="text-xs text-gray-400 truncate">{testMintStatus}</span>
+            )}
+          </div>
+        )}
+
+        {isZeroEvmToZeroRoute && (
+          <label className="block bg-[#1a1a28] rounded-xl p-4 focus-within:ring-1 focus-within:ring-telos-cyan/30 transition-all duration-200">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <span className="block text-xs text-gray-500 uppercase tracking-wider">Telos Zero receiver</span>
+              <button
+                type="button"
+                onClick={handleConnectZeroSigner}
+                disabled={connectingZeroSigner}
+                className="text-xs font-semibold text-telos-cyan hover:text-telos-cyan/75 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {connectingZeroSigner ? 'Connecting...' : zeroSigner ? `${zeroSigner.actor}@${zeroSigner.permission}` : 'Use Zero wallet'}
+              </button>
+            </div>
+            <input
+              value={zeroReceiver}
+              onChange={(event) => {
+                setZeroReceiver(event.target.value)
+                clearQuotes()
+              }}
+              placeholder="nativeaccount"
+              className="h-12 w-full rounded-lg border border-white/[0.06] bg-black/20 px-3 text-base text-white outline-none transition placeholder:text-gray-600 focus:border-telos-cyan/50"
+            />
+          </label>
+        )}
+
+        {isZeroSignedRoute && (
+          <div className="grid gap-3">
+            <label className="block bg-[#1a1a28] rounded-xl p-4 focus-within:ring-1 focus-within:ring-telos-cyan/30 transition-all duration-200">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span className="block text-xs text-gray-500 uppercase tracking-wider">Telos Zero sender</span>
+                <button
+                  type="button"
+                  onClick={handleConnectZeroSigner}
+                  disabled={connectingZeroSigner}
+                  className="text-xs font-semibold text-telos-cyan hover:text-telos-cyan/75 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {connectingZeroSigner ? 'Connecting...' : zeroSigner ? `${zeroSigner.actor}@${zeroSigner.permission}` : 'Connect Zero'}
+                </button>
+              </div>
+              <input
+                value={zeroSender}
+                onChange={(event) => {
+                  setZeroSender(event.target.value)
+                  clearQuotes()
+                }}
+                placeholder="nativeaccount"
+                className="h-12 w-full rounded-lg border border-white/[0.06] bg-black/20 px-3 text-base text-white outline-none transition placeholder:text-gray-600 focus:border-telos-cyan/50"
+              />
+            </label>
+
+            <label className="block bg-[#1a1a28] rounded-xl p-4 focus-within:ring-1 focus-within:ring-telos-cyan/30 transition-all duration-200">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span className="block text-xs text-gray-500 uppercase tracking-wider">Telos EVM receiver</span>
+                {address && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEvmReceiver(address)
+                      clearQuotes()
+                    }}
+                    className="text-xs font-semibold text-telos-cyan hover:text-telos-cyan/75"
+                  >
+                    Use connected
+                  </button>
+                )}
+              </div>
+              <input
+                value={evmReceiver}
+                onChange={(event) => {
+                  setEvmReceiver(event.target.value)
+                  clearQuotes()
+                }}
+                placeholder="0x..."
+                className="h-12 w-full rounded-lg border border-white/[0.06] bg-black/20 px-3 text-base text-white outline-none transition placeholder:text-gray-600 focus:border-telos-cyan/50"
+              />
+            </label>
+          </div>
+        )}
 
         {/* Quote display */}
         {(hasQuote || quoting) && (
@@ -722,17 +1364,21 @@ export function BridgeForm() {
             quoting={quoting}
             amount={amount}
             token={token}
+            displayToken={receiveTokenSymbol}
             toChainName={chainName(toChain)}
-            amountReceived={v2Quote ? v2Quote.amountReceivedFormatted : amount}
-            isStargate={OFT_V2_TOKENS[token]?.isStargate}
-            nativeFee={oftQuote 
-              ? `~${parseFloat(oftQuote.nativeFeeFormatted) >= 1 ? parseFloat(oftQuote.nativeFeeFormatted).toFixed(0) : parseFloat(oftQuote.nativeFeeFormatted).toFixed(4)}` 
-              : v2Quote 
+            amountReceived={zeroNativeQuote ? zeroNativeQuote.amountReceivedFormatted : zeroQuote ? zeroQuote.amountReceivedFormatted : v2Quote ? v2Quote.amountReceivedFormatted : amount}
+            isStargate={!isZeroRoute && OFT_V2_TOKENS[token]?.isStargate}
+            nativeFee={oftQuote
+              ? `~${parseFloat(oftQuote.nativeFeeFormatted) >= 1 ? parseFloat(oftQuote.nativeFeeFormatted).toFixed(0) : parseFloat(oftQuote.nativeFeeFormatted).toFixed(4)}`
+              : v2Quote
                 ? `~${parseFloat(v2Quote.nativeFeeFormatted) >= 1 ? parseFloat(v2Quote.nativeFeeFormatted).toFixed(0) : parseFloat(v2Quote.nativeFeeFormatted).toFixed(4)}`
                 : undefined
             }
             feeCurrency={CHAIN_MAP.get(fromChain)?.nativeCurrency || 'TLOS'}
-            estimatedTime="~2 min"
+            estimatedTime={isZeroNativeTlos ? '~5 sec' : isZeroRoute ? '~15 sec' : '~2 min'}
+            provider={(isZeroRoute || isZeroNativeTlos) ? 'telos-zero' : undefined}
+            routeLabel={isZeroNativeTlos ? 'Native TLOS' : isZeroToEvmRoute ? 'Zero bridge' : isZeroEvmToZeroRoute ? 'Zero bridge' : undefined}
+            rateLabel={isZeroNativeTlos ? '1:1 native deposit' : isZeroToEvmRoute ? '1:1 burn/release' : isZeroEvmToZeroRoute ? '1:1 escrowed mint' : undefined}
           />
         )}
 
@@ -741,8 +1387,8 @@ export function BridgeForm() {
           const nativeFeeStr = oftQuote?.nativeFeeFormatted || v2Quote?.nativeFeeFormatted
           const fCurrency = CHAIN_MAP.get(fromChain)?.nativeCurrency || 'TLOS'
           if (amount && (oftQuote || v2Quote) && nativeFeeStr && parseFloat(amount) < parseFloat(nativeFeeStr) * 3) {
-            const feeDisplay = parseFloat(nativeFeeStr) >= 1 
-              ? parseFloat(nativeFeeStr).toFixed(0) 
+            const feeDisplay = parseFloat(nativeFeeStr) >= 1
+              ? parseFloat(nativeFeeStr).toFixed(0)
               : parseFloat(nativeFeeStr).toFixed(4)
             return (
               <div className="bg-amber-500/[0.06] border border-amber-500/10 rounded-xl px-4 py-3 text-xs text-amber-400/90 leading-relaxed">
@@ -759,7 +1405,8 @@ export function BridgeForm() {
           txHash={transactionHash}
           fromChainId={fromChain}
           toChainId={toChain}
-          estimatedTime="~2 min"
+          estimatedTime={isZeroNativeTlos ? '~5 sec' : isZeroRoute ? '~15 sec' : '~2 min'}
+          routeKind={isZeroNativeTlos ? 'native-tlos' : isZeroToEvmRoute ? 'zero-to-evm' : isZeroEvmToZeroRoute ? 'zero' : 'layerzero'}
         />
 
         {/* Enhanced settings panel */}
@@ -767,9 +1414,9 @@ export function BridgeForm() {
           <BridgeSettings
             slippage={slippage}
             onSlippageChange={setSlippage}
-            estimatedGas={oftQuote 
-              ? `${oftQuote.nativeFeeFormatted} ${CHAIN_MAP.get(fromChain)?.nativeCurrency || 'TLOS'}` 
-              : v2Quote 
+            estimatedGas={oftQuote
+              ? `${oftQuote.nativeFeeFormatted} ${CHAIN_MAP.get(fromChain)?.nativeCurrency || 'TLOS'}`
+              : v2Quote
                 ? `${v2Quote.nativeFeeFormatted} ${CHAIN_MAP.get(fromChain)?.nativeCurrency || 'TLOS'}`
                 : undefined
             }
@@ -797,20 +1444,20 @@ export function BridgeForm() {
         {/* Network warning */}
         {wrongNetwork && !bridging && !bridgeStatus && (
           <div className="bg-amber-500/[0.06] border border-amber-500/10 rounded-xl px-4 py-2.5 text-xs text-amber-400/80 leading-relaxed">
-            Will switch to {chainName(fromChain)} on bridge
+            Will switch to {chainName(sourceEvmChainId || fromChain)} on bridge
           </div>
         )}
 
         {/* From non-Telos notice */}
-        {fromChain !== 40 && tokenList.length === 1 && (
+        {fromChain !== 40 && tokenList.length === 1 && !isZeroRoute && (
           <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-xs text-gray-400 leading-relaxed">
             Only TLOS bridging available on this route
           </div>
         )}
 
         {/* CTA */}
-        {!address ? (
-          <button 
+        {!address && !isZeroSignedRoute ? (
+          <button
             onClick={openConnectModal}
             className="w-full py-4 sm:py-5 rounded-2xl font-semibold text-base sm:text-lg bg-gradient-to-r from-telos-cyan via-telos-blue to-telos-purple text-white hover:opacity-90 hover:shadow-xl hover:shadow-telos-cyan/20 active:scale-98 transition-all duration-200 shadow-lg shadow-telos-cyan/10 touch-manipulation"
           >
@@ -818,15 +1465,19 @@ export function BridgeForm() {
           </button>
         ) : (
           <button onClick={hasQuote ? handleBridge : doQuote}
-            disabled={!amount || parseFloat(amount) <= 0 || quoting || bridging || fromChain === toChain || (!isOft && !isMst && !isV2) || insufficientBalance}
+            disabled={!amount || parseFloat(amount) <= 0 || quoting || bridging || fromChain === toChain || (!isOft && !isMst && !isV2 && !isZeroRoute && !isZeroNativeTlos) || (isZeroEvmToZeroRoute && (!zeroRouteConfigured || !zeroReceiver.trim())) || (isZeroSignedRoute && (!isValidZeroAccountName(zeroSender) || !isAddress(evmReceiver))) || insufficientBalance}
             className="w-full py-4 sm:py-5 rounded-2xl font-semibold text-base sm:text-lg bg-gradient-to-r from-telos-cyan via-telos-blue to-telos-purple text-white disabled:opacity-30 disabled:cursor-not-allowed hover:opacity-90 hover:shadow-xl hover:shadow-telos-cyan/20 active:scale-98 transition-all duration-200 shadow-lg shadow-telos-cyan/10 relative overflow-hidden group touch-manipulation">
             <span className="relative z-10 flex items-center justify-center gap-2">
               {(quoting || bridging) && <LoadingSpinner size="sm" className="text-white" />}
-              {insufficientBalance ? 'Insufficient balance' : 
-               quoting ? 'Getting quote...' : 
-               bridging ? 'Bridging...' : 
-               hasQuote ? `Bridge ${token}` : 
-               (!amount || parseFloat(amount) <= 0) ? 'Enter an amount' : 'Get Quote'}
+              {insufficientBalance ? 'Insufficient balance' :
+               quoting ? 'Getting quote...' :
+               bridging ? 'Preparing...' :
+               hasQuote ? (isZeroSignedRoute ? `Bridge ${token}` : `Bridge ${token}`) :
+               isZeroEvmToZeroRoute && !zeroRouteConfigured ? 'Missing route config' :
+               (!amount || parseFloat(amount) <= 0) ? 'Enter an amount' :
+               isZeroEvmToZeroRoute && !zeroReceiver.trim() ? 'Enter Zero receiver' :
+               isZeroSignedRoute && !isValidZeroAccountName(zeroSender) ? 'Enter Zero sender' :
+               isZeroSignedRoute && !isAddress(evmReceiver) ? 'Enter EVM receiver' : 'Get Quote'}
             </span>
             <div className="absolute inset-0 bg-gradient-to-r from-telos-cyan/10 via-white/5 to-telos-cyan/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
           </button>

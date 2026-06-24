@@ -10,29 +10,38 @@ interface QuoteDisplayProps {
   quoting: boolean
   amount: string
   token: string
+  displayToken?: string
   toChainName: string
   amountReceived?: string
   isStargate?: boolean
   nativeFee?: string
   feeCurrency?: string
   estimatedTime?: string
+  provider?: 'layerzero' | 'stargate' | 'telos-zero'
+  routeLabel?: string
+  rateLabel?: string
 }
 
 export function QuoteDisplay({ 
   quoting, 
   amount, 
   token, 
+  displayToken,
   toChainName,
   amountReceived,
   isStargate,
   nativeFee,
   feeCurrency,
-  estimatedTime = "~2 min"
+  estimatedTime = "~2 min",
+  provider,
+  routeLabel,
+  rateLabel,
 }: QuoteDisplayProps) {
   const { reduceMotion } = useAnimation()
   const [isVisible, setIsVisible] = useState(false)
   
   const displayAmount = amountReceived || amount
+  const receiveToken = displayToken || token
   const numericAmount = parseFloat(displayAmount) || 0
   
   const { formattedValue } = useCountUp({
@@ -43,6 +52,7 @@ export function QuoteDisplay({
   })
 
   const TOKEN_LOGOS = TOKEN_ICONS
+  const routeProvider = provider ?? (isStargate ? 'stargate' : 'layerzero')
 
   useEffect(() => {
     setIsVisible(true)
@@ -109,7 +119,7 @@ export function QuoteDisplay({
           reduceMotion ? '' : 'animate-in slide-in-from-right-2 delay-400 duration-400'
         }`}>
           {TOKEN_LOGOS[token] && <img src={TOKEN_LOGOS[token]} alt="" className="w-5 h-5 rounded-full" />}
-          {token} on {toChainName}
+          {receiveToken} on {toChainName}
         </div>
       </div>
 
@@ -120,9 +130,14 @@ export function QuoteDisplay({
         <div className="flex justify-between items-center text-xs">
           <span className="text-gray-500">Route</span>
           <div className="flex items-center gap-2">
-            {isStargate ? (
+            {routeProvider === 'stargate' ? (
               <div className="flex items-center gap-1.5">
                 <img src="/providers/stargate.svg" alt="Stargate" className="h-4 opacity-80" />
+              </div>
+            ) : routeProvider === 'telos-zero' ? (
+              <div className="flex items-center gap-1.5">
+                <img src="/telos-logo.svg" alt="Telos" className="h-4 opacity-80" />
+                <span className="text-white/70 text-[10px]">{routeLabel || 'Zero bridge'}</span>
               </div>
             ) : (
               <div className="flex items-center gap-1.5">
@@ -134,7 +149,7 @@ export function QuoteDisplay({
         </div>
         <div className="flex justify-between text-xs">
           <span className="text-gray-500">Rate</span>
-          <span className="text-gray-300">{isStargate ? '~1:1 (minimal slippage)' : '1:1 — no slippage'}</span>
+          <span className="text-gray-300">{rateLabel || (isStargate ? '~1:1 (minimal slippage)' : '1:1 — no slippage')}</span>
         </div>
         {nativeFee && (
           <div className="flex justify-between text-xs">
@@ -145,6 +160,7 @@ export function QuoteDisplay({
       </div>
       
       {/* Confidence indicator */}
+      {routeProvider !== 'telos-zero' && (
       <div className={`flex items-center gap-2 pt-1 ${
         reduceMotion ? '' : 'animate-in slide-in-from-bottom-1 delay-700 duration-500'
       }`}>
@@ -155,6 +171,7 @@ export function QuoteDisplay({
         </div>
         <span className="text-xs text-gray-500">85% savings vs alternatives</span>
       </div>
+      )}
     </div>
   )
 }

@@ -25,6 +25,8 @@ const MAX_TRANSACTIONS = 50
 
 // Chain configuration for display
 const CHAIN_CONFIG: Record<number, { name: string; iconUrl: string }> = {
+  [-41]: { name: 'Telos Zero Testnet', iconUrl: '/chains/telos.svg' },
+  41: { name: 'Telos EVM Testnet', iconUrl: '/chains/telos.svg' },
   40: { name: 'Telos', iconUrl: '/chains/telos.png' },
   1: { name: 'Ethereum', iconUrl: '/chains/ethereum.png' },
   8453: { name: 'Base', iconUrl: '/chains/base.png' },
@@ -87,6 +89,7 @@ export function RecentTransactions({ isOpen, onClose }: RecentTransactionsProps)
   const getExplorerUrl = (chainId: number, txHash: string) => {
     const explorers: Record<number, string> = {
       1: 'https://etherscan.io',
+      41: 'https://testnet.teloscan.io',
       40: 'https://teloscan.io',
       8453: 'https://basescan.org',
       56: 'https://bscscan.com',

@@ -11,6 +11,7 @@ interface TransactionStepperProps {
   fromChainId?: number
   toChainId?: number
   estimatedTime?: string
+  routeKind?: 'layerzero' | 'zero' | 'zero-to-evm' | 'native-tlos'
 }
 
 // Clean modern SVG icons
@@ -44,7 +45,9 @@ const CompletedIcon = () => (
 interface StepConfig {
   id: TransactionStep
   label: string
+  completedLabel?: string
   description: string
+  completedDescription?: string
   Icon: () => React.ReactElement
 }
 
@@ -70,7 +73,95 @@ const STEPS: StepConfig[] = [
   {
     id: 'completed',
     label: 'Complete',
+    completedLabel: 'Complete',
     description: 'Funds received successfully',
+    Icon: CompletedIcon,
+  },
+]
+
+const ZERO_STEPS: StepConfig[] = [
+  {
+    id: 'submitted',
+    label: 'Submitted',
+    description: 'EVM escrow sent',
+    Icon: SubmittedIcon,
+  },
+  {
+    id: 'confirming',
+    label: 'Confirming',
+    description: 'Waiting for finality',
+    Icon: ConfirmingIcon,
+  },
+  {
+    id: 'bridging',
+    label: 'Proving',
+    description: 'Proof relay needed',
+    Icon: BridgingIcon,
+  },
+  {
+    id: 'completed',
+    label: 'Mint',
+    completedLabel: 'Minted',
+    description: 'Awaiting Zero mint',
+    completedDescription: 'Zero assets minted',
+    Icon: CompletedIcon,
+  },
+]
+
+const ZERO_TO_EVM_STEPS: StepConfig[] = [
+  {
+    id: 'submitted',
+    label: 'Submitted',
+    description: 'Zero burn sent',
+    Icon: SubmittedIcon,
+  },
+  {
+    id: 'confirming',
+    label: 'Confirming',
+    description: 'Waiting for finality',
+    Icon: ConfirmingIcon,
+  },
+  {
+    id: 'bridging',
+    label: 'Releasing',
+    description: 'EVM release relay',
+    Icon: BridgingIcon,
+  },
+  {
+    id: 'completed',
+    label: 'Complete',
+    completedLabel: 'Released',
+    description: 'Awaiting EVM funds',
+    completedDescription: 'EVM assets released',
+    Icon: CompletedIcon,
+  },
+]
+
+const NATIVE_TLOS_STEPS: StepConfig[] = [
+  {
+    id: 'submitted',
+    label: 'Prepared',
+    description: 'Zero action ready',
+    Icon: SubmittedIcon,
+  },
+  {
+    id: 'confirming',
+    label: 'Sign',
+    description: 'Waiting for Zero tx',
+    Icon: ConfirmingIcon,
+  },
+  {
+    id: 'bridging',
+    label: 'Crediting',
+    description: 'EVM balance update',
+    Icon: BridgingIcon,
+  },
+  {
+    id: 'completed',
+    label: 'Credit',
+    completedLabel: 'Credited',
+    description: 'Awaiting EVM TLOS',
+    completedDescription: 'EVM TLOS received',
     Icon: CompletedIcon,
   },
 ]
@@ -80,7 +171,8 @@ export function TransactionStepper({
   txHash,
   fromChainId,
   toChainId,
-  estimatedTime = '~2 min'
+  estimatedTime = '~2 min',
+  routeKind = 'layerzero',
 }: TransactionStepperProps) {
   const { reduceMotion } = useAnimation()
 
@@ -88,8 +180,22 @@ export function TransactionStepper({
     return null
   }
 
-  const currentStepIndex = STEPS.findIndex(step => step.id === currentStep)
+  const steps = routeKind === 'zero'
+    ? ZERO_STEPS
+    : routeKind === 'zero-to-evm'
+      ? ZERO_TO_EVM_STEPS
+    : routeKind === 'native-tlos'
+      ? NATIVE_TLOS_STEPS
+      : STEPS
+  const currentStepIndex = steps.findIndex(step => step.id === currentStep)
   const isCompleted = currentStep === 'completed'
+  const timeLabel = routeKind === 'native-tlos'
+    ? 'Waiting for Zero transfer'
+    : routeKind === 'zero-to-evm' && currentStep === 'bridging'
+      ? 'Waiting for EVM release'
+    : routeKind === 'zero' && currentStep === 'bridging'
+      ? 'Waiting for proof relay'
+      : `${estimatedTime} remaining`
 
   const getStepStatus = (stepIndex: number) => {
     if (isCompleted) return 'completed' // All steps green when bridge is done
@@ -108,44 +214,46 @@ export function TransactionStepper({
           <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" />
           <span className="text-sm text-gray-400">Transaction Progress</span>
         </div>
-        {!isCompleted && <div className="text-xs text-gray-500">{estimatedTime} remaining</div>}
+        {!isCompleted && <div className="text-xs text-gray-500">{timeLabel}</div>}
       </div>
 
       {/* Progress Bar */}
       <div className="relative">
         <div className="absolute top-5 left-6 right-6 h-0.5 bg-gray-800">
-          <div 
+          <div
             className={`h-full transition-all duration-1000 ease-out ${
-              isCompleted 
-                ? 'bg-emerald-400' 
+              isCompleted
+                ? 'bg-emerald-400'
                 : 'bg-gradient-to-r from-purple-500 to-telos-cyan'
             }`}
-            style={{ 
-              width: isCompleted ? '100%' : `${((currentStepIndex + 1) / STEPS.length) * 100}%` 
+            style={{
+              width: isCompleted ? '100%' : `${((currentStepIndex + 1) / steps.length) * 100}%`
             }}
           />
         </div>
 
         {/* Steps */}
         <div className="flex justify-between">
-          {STEPS.map((step, index) => {
+          {steps.map((step, index) => {
             const status = getStepStatus(index)
             const isCurrent = status === 'current'
             const isCompleted = status === 'completed'
             const { Icon } = step
+            const label = isCompleted && step.completedLabel ? step.completedLabel : step.label
+            const description = isCompleted && step.completedDescription ? step.completedDescription : step.description
 
             return (
               <div key={step.id} className="flex flex-col items-center space-y-2">
                 {/* Step Icon */}
                 <div className={`relative w-10 h-10 rounded-full border-2 flex items-center justify-center transition-all duration-500 ${
-                  isCompleted 
-                    ? 'border-emerald-400 bg-emerald-400/10 text-emerald-400' 
-                    : isCurrent 
-                      ? 'border-telos-cyan bg-telos-cyan/10 text-telos-cyan' 
+                  isCompleted
+                    ? 'border-emerald-400 bg-emerald-400/10 text-emerald-400'
+                    : isCurrent
+                      ? 'border-telos-cyan bg-telos-cyan/10 text-telos-cyan'
                       : 'border-gray-700 bg-gray-800/50 text-gray-600'
                 }`}>
                   <Icon />
-                  
+
                   {/* Animated ring for current step */}
                   {isCurrent && !reduceMotion && (
                     <div className="absolute inset-0 rounded-full border border-telos-cyan/30" />
@@ -155,16 +263,16 @@ export function TransactionStepper({
                 {/* Step Label */}
                 <div className="text-center">
                   <div className={`text-xs font-medium transition-colors duration-300 ${
-                    isCompleted 
-                      ? 'text-emerald-400' 
-                      : isCurrent 
-                        ? 'text-telos-cyan' 
+                    isCompleted
+                      ? 'text-emerald-400'
+                      : isCurrent
+                        ? 'text-telos-cyan'
                         : 'text-gray-500'
                   }`}>
-                    {step.label}
+                    {label}
                   </div>
                   <div className="text-[10px] text-gray-600 max-w-20 leading-tight">
-                    {step.description}
+                    {description}
                   </div>
                 </div>
               </div>
@@ -180,7 +288,7 @@ export function TransactionStepper({
         }`}>
           <div className="flex items-center justify-between text-xs">
             <span className="text-gray-500">Source tx</span>
-            <a 
+            <a
               href={getExplorerUrl(fromChainId, txHash)}
               target="_blank"
               rel="noopener noreferrer"
@@ -189,17 +297,19 @@ export function TransactionStepper({
               tx link ↗
             </a>
           </div>
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-gray-500">LayerZero</span>
-            <a 
-              href={`https://layerzeroscan.com/tx/${txHash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-purple-400 hover:text-purple-300 transition-colors"
-            >
-              Track on LZScan ↗
-            </a>
-          </div>
+          {routeKind === 'layerzero' ? (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-gray-500">LayerZero</span>
+              <a
+                href={`https://layerzeroscan.com/tx/${txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-purple-400 hover:text-purple-300 transition-colors"
+              >
+                Track on LZScan ↗
+              </a>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -222,9 +332,14 @@ export function TransactionStepper({
 
 // Helper function to get block explorer URL
 function getExplorerUrl(chainId: number | undefined, txHash: string): string {
+  if (chainId === -41) {
+    return `https://explorer-test.telos.net/transaction/${txHash}`
+  }
+
   const explorers: Record<number, string> = {
     1: 'https://etherscan.io',
     40: 'https://teloscan.io',
+    41: 'https://testnet.teloscan.io',
     8453: 'https://basescan.org',
     137: 'https://polygonscan.com',
     42161: 'https://arbiscan.io',

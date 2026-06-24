@@ -7,4 +7,5 @@ export const TOKEN_ICONS: Record<string, string> = {
   ETH: `${BASE_PATH}/tokens/ETH.png`,
   WBTC: `${BASE_PATH}/tokens/WBTC.png`,
   MST: `${BASE_PATH}/tokens/MST.svg`,
+  EMPIRES: `${BASE_PATH}/tokens/EMPIRES.svg`,
 }

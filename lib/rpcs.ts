@@ -1,6 +1,7 @@
 import { arbitrum, aurora, avalanche, base, bsc, gnosis, kava, linea, mainnet, mantle, metis, optimism, polygon, scroll, sei, telos } from 'wagmi/chains'
 
 export const CHAIN_RPC_URLS: Record<number, string> = {
+  41: process.env.NEXT_PUBLIC_TELOS_TESTNET_RPC || 'https://rpc.testnet.telos.net',
   [telos.id]: 'https://rpc.telos.net/evm',
   [mainnet.id]: 'https://ethereum-rpc.publicnode.com',
   [base.id]: 'https://base-rpc.publicnode.com',
