@@ -29,6 +29,7 @@ import { fetchLayerZeroTxStatus, isLayerZeroTerminalStatus } from '@/lib/layerze
 // Token logos for the "You receive" section
 const TOKEN_LOGOS = TOKEN_ICONS
 const ISSUE_REPORT_BASE_URL = 'https://github.com/telosnetwork/telos-bridge-v3/issues/new'
+const ZERO_TO_EVM_RETRY_DELAY_MS = 45_000
 
 // ERC20 ABI for balanceOf
 const ERC20_ABI = [
@@ -250,6 +251,7 @@ export function BridgeForm() {
   } | null>(null)
   const [evmToZeroPending, setEvmToZeroPending] = useState<EvmToZeroProofRequest | null>(null)
   const [zeroToEvmPending, setZeroToEvmPending] = useState<ZeroToEvmPendingRelease | null>(null)
+  const [zeroToEvmRetryReady, setZeroToEvmRetryReady] = useState(false)
   const sourceEvmChainId = isTelosZeroChain(fromChain) ? undefined : fromChain
   const wagmiPublicClient = usePublicClient({ chainId: sourceEvmChainId })
   // Fallback: create a direct viem client if wagmi hasn't hydrated yet
@@ -498,7 +500,7 @@ export function BridgeForm() {
   const clearQuotes = () => { 
     setOftQuote(null); setV2Quote(null); setZeroQuote(null); setZeroNativeQuote(null); setError(null); setBridgeStatus(null);
     setTransactionStep('idle'); setTransactionHash(undefined); setDestinationTransactionHash(undefined); setDestinationTransactionChainId(undefined); setZeroRequestHash(undefined); setCurrentTransactionId(undefined);
-	    setZeroNativePending(null); setEvmToZeroPending(null); setZeroToEvmPending(null);
+	    setZeroNativePending(null); setEvmToZeroPending(null); setZeroToEvmPending(null); setZeroToEvmRetryReady(false);
     setShowSuccessCelebration(false);
   }
 
@@ -798,6 +800,7 @@ export function BridgeForm() {
           }
           setBridgeStatus(`${zeroToEvmPending.symbol} released on Telos EVM.`)
           setTransactionStep('completed')
+          setZeroToEvmRetryReady(false)
           setShowSuccessCelebration(true)
           updateTransaction(currentTransactionId, {
             status: 'completed',
@@ -823,6 +826,17 @@ export function BridgeForm() {
     }
   }, [isZeroToEvmRoute, zeroToEvmPublicClient, zeroToEvmPending, currentTransactionId, transactionStep])
 
+  useEffect(() => {
+    if (!isZeroToEvmRoute || !zeroToEvmPending || transactionStep !== 'bridging') {
+      setZeroToEvmRetryReady(false)
+      return
+    }
+
+    setZeroToEvmRetryReady(false)
+    const timeoutId = setTimeout(() => setZeroToEvmRetryReady(true), ZERO_TO_EVM_RETRY_DELAY_MS)
+    return () => clearTimeout(timeoutId)
+  }, [isZeroToEvmRoute, zeroToEvmPending, transactionStep])
+
   const submitZeroToEvmReleaseRelay = useCallback(async (
     pending: ZeroToEvmPendingRelease,
     transactionId = currentTransactionId,
@@ -830,7 +844,7 @@ export function BridgeForm() {
     setBridging(true)
     setError(null)
     setTransactionStep('bridging')
-    setBridgeStatus(`${pending.quantity} burn recorded. Sign fallback release to retry.`)
+    setBridgeStatus(`${pending.quantity} burn recorded. Sign retry release in Anchor.`)
 
     try {
       await relayZeroToEvmBridgeRequest({
@@ -855,7 +869,7 @@ export function BridgeForm() {
       } else {
         setError(createError('bridge_failed', 'Fallback release failed', msg))
       }
-      setBridgeStatus(`${pending.quantity} burn recorded. Automatic release is still pending.`)
+      setBridgeStatus(`${pending.quantity} burn recorded. Release is still pending.`)
       setTransactionStep('bridging')
     } finally {
       setBridging(false)
@@ -1127,12 +1141,13 @@ export function BridgeForm() {
         }
 
         setZeroToEvmPending(pending)
+        setZeroToEvmRetryReady(false)
         setZeroQuote(null)
         setTransactionHash(result.transactionId)
         if (result.transactionId) {
           updateTransaction(transaction.id, { txHash: result.transactionId, status: 'pending' })
         }
-        setBridgeStatus(`${result.quantity} burn recorded. Waiting for automatic EVM release.`)
+        setBridgeStatus(`${result.quantity} burn recorded. Confirming inline EVM release.`)
         setTransactionStep('bridging')
         setAmount('')
       } catch (e: any) {
@@ -1776,7 +1791,7 @@ export function BridgeForm() {
           chainName={chainName}
         />
 
-        {isZeroToEvmRoute && zeroToEvmPending && transactionStep === 'bridging' && (
+        {isZeroToEvmRoute && zeroToEvmPending && transactionStep === 'bridging' && zeroToEvmRetryReady && (
           <button
             type="button"
             onClick={() => submitZeroToEvmReleaseRelay(zeroToEvmPending)}
@@ -1785,7 +1800,7 @@ export function BridgeForm() {
           >
             <span className="flex items-center justify-center gap-2">
               {bridging && <LoadingSpinner size="sm" className="text-telos-cyan" />}
-              Retry Release Manually
+              Retry Release
             </span>
           </button>
         )}
@@ -1842,7 +1857,7 @@ export function BridgeForm() {
                quoting ? 'Getting quote...' : 
                isEvmToZeroMintProofPending ? (bridging ? 'Waiting for Zero signature...' : 'Mint on Telos Zero') :
                bridging ? 'Preparing...' : 
-               isZeroToEvmRoute && zeroToEvmPending && transactionStep === 'bridging' ? 'Release pending' :
+               isZeroToEvmRoute && zeroToEvmPending && transactionStep === 'bridging' ? (zeroToEvmRetryReady ? 'Release retry available' : 'Confirming release') :
                hasQuote ? (isZeroSignedRoute ? `Bridge ${token}` : `Bridge ${token}`) : 
                isZeroEvmToZeroRoute && !zeroRouteConfigured ? 'Missing route config' :
                (!amount || parseFloat(amount) <= 0) ? 'Enter an amount' :
