@@ -4,7 +4,8 @@
 
 import { parseUnits, formatUnits, type Address, type Hex, encodeFunctionData, decodeFunctionResult } from 'viem'
 
-// LZ V2 Endpoint IDs
+// LZ V2 Endpoint IDs — verified against LayerZero mainnet metadata
+// https://metadata.layerzero-api.com/v1/metadata/deployments
 export const LZ_V2_EIDS: Record<number, number> = {
   40: 30199,    // Telos
   1: 30101,     // Ethereum
@@ -22,23 +23,35 @@ export const LZ_V2_EIDS: Record<number, number> = {
   8217: 30150,  // Kaia
   1088: 30151,  // Metis
   1313161554: 30211, // Aurora
-  100: 30284,   // Gnosis
+  100: 30145,   // Gnosis (was incorrectly 30284 / IOTA)
   1116: 30153,  // Core
   167000: 30290, // Taiko
   169: 30340,   // Manta Pacific
   30: 30333,    // Rootstock
   8822: 30284,  // IOTA EVM
-  14: 30295,    // Flare  
-  80084: 30362, // Berachain
-  666666666: 30267, // Degen Chain  
+  14: 30295,    // Flare
+  80084: 30362, // Berachain (app chain id; LZ lists mainnet as 80094)
+  666666666: 30267, // Degen Chain
   1514: 30364, // Story Protocol
   1890: 30309, // Lightlink
   33139: 30312, // ApeChain
-  146: 30145,   // Sonic
-  1625: 30361,  // Gravity
-  747: 30329,   // Flow EVM
-  50: 30327,    // XDC Network
+  146: 30332,   // Sonic (was incorrectly 30145 / Gnosis)
+  1625: 30294,  // Gravity (was incorrectly 30361)
+  747: 30336,   // Flow EVM (was incorrectly 30329)
+  50: 30365,    // XDC Network (was incorrectly 30327)
   1480: 30370,  // Vana
+}
+
+/** Convert UI slippage percent (e.g. 0.5 => 0.5%) into a minimum amount. */
+export function applySlippageMin(amount: bigint, slippagePercent: number): bigint {
+  if (!Number.isFinite(slippagePercent) || slippagePercent < 0) {
+    throw new Error('Invalid slippage')
+  }
+  // Cap at 50% to avoid accidental zero/negative mins from bad UI state.
+  const capped = Math.min(slippagePercent, 50)
+  const bps = BigInt(Math.round(capped * 100)) // 0.5% -> 50 bps
+  if (bps >= 10000n) return 0n
+  return amount * (10000n - bps) / 10000n
 }
 
 // OFT V2 token configs on Telos
@@ -82,8 +95,10 @@ export const OFT_V2_TOKENS: Record<string, OftV2Token> = {
       666666666: '0xAF54BE5B6eEc24d6BFACf1cce4eaF680A8239398', // Degen StargateOFTUSDC
       1890: '0x8EE21165Ecb7562BA716c9549C1dE751282b9B33',      // Lightlink StargateOFTUSDC
       33139: '0x2086f755A6d9254045C257ea3d382ef854849B0f',     // ApeChain StargateOFTUSDC
-      146: '0xB1EeAD6959cb5bB9B20417d6689922523B2B86C3',       // Sonic StargatePoolUSDC
-      747: '0x45f1A95A4D3f3836523F5c83673c797f4d4d263B',       // Flow StargateOFTUSDC
+      // Sonic USDC pool from stargate-v2 sonic-mainnet deployment (not Gnosis)
+      146: '0xA272fFe20cFfe769CdFc4b63088DCD2C82a2D8F9',       // Sonic StargatePoolUSDC
+      // Flow OFT addresses from stargate-v2 flow-mainnet deployment
+      747: '0xAF54BE5B6eEc24d6BFACf1cce4eaF680A8239398',       // Flow StargateOFTUSDC
     },
   },
   USDT: {
@@ -113,7 +128,8 @@ export const OFT_V2_TOKENS: Record<string, OftV2Token> = {
       666666666: '0xAf5191B0De278C7286d6C7CC6ab6BB8A73bA2Cd6', // Degen StargateOFTUSDT
       1890: '0x06D538690AF257Da524f25D0CD52fD85b1c2173E',      // Lightlink StargateOFTUSDT
       33139: '0xEb8d955d8Ae221E5b502851ddd78E6C4498dB4f6',     // ApeChain StargateOFTUSDT
-      747: '0xAF54BE5B6eEc24d6BFACf1cce4eaF680A8239398',       // Flow StargateOFTUSDT
+      // Sonic has no Stargate USDT deployment in stargate-v2 — do not advertise
+      747: '0xAf5191B0De278C7286d6C7CC6ab6BB8A73bA2Cd6',       // Flow StargateOFTUSDT
     },
   },
   WBTC: {
@@ -152,8 +168,8 @@ export const OFT_V2_TOKENS: Record<string, OftV2Token> = {
       666666666: '0x45f1A95A4D3f3836523F5c83673c797f4d4d263B', // Degen StargateOFTETH
       1890: '0x8731d54E9D02c286767d56ac03e8037C07e01e98',      // Lightlink StargatePoolNative
       33139: '0x28E0f0eed8d6A6a96033feEe8b2D7F32EB5CCc48',     // ApeChain StargateOFTETH
-      146: '0xe9aBA835f813ca05E50A6C0ce65D0D74390F7dE7',       // Sonic StargatePoolETH
-      747: '0x2F6F07CDcf3588944Bf4C42aC74ff24bF56e7590',       // Flow StargatePoolNative
+      // Sonic has USDC only in stargate-v2 — do not advertise ETH (was Gnosis pool)
+      747: '0x45f1A95A4D3f3836523F5c83673c797f4d4d263B',       // Flow StargateOFTETH
     },
   },
 }
@@ -343,6 +359,7 @@ export async function quoteOftV2Send(
   toChain: number,
   amount: string,
   toAddress: Address,
+  slippagePercent: number = 0.5,
 ): Promise<OftV2QuoteResult> {
   const config = OFT_V2_TOKENS[token]
   if (!config) throw new Error(`Unknown OFT V2 token: ${token}`)
@@ -357,7 +374,8 @@ export async function quoteOftV2Send(
     dstEid,
     to: toBytes32,
     amountLD,
-    minAmountLD: amountLD * 90n / 100n, // 10% slippage for quote
+    // Quote path may use a loose floor; execution enforces the user-selected min.
+    minAmountLD: applySlippageMin(amountLD, Math.max(slippagePercent, 1)),
     extraOptions: '0x' as Hex,
     composeMsg: '0x' as Hex,
     oftCmd: '0x' as Hex, // taxi mode (empty = taxi)
@@ -375,8 +393,8 @@ export async function quoteOftV2Send(
           args: [sendParam],
         }) as any
         amountReceived = oftQuote[2]?.amountReceivedLD || oftQuote.oftReceipt?.amountReceivedLD || amountLD
-        // Update minAmountLD based on actual received amount
-        sendParam.minAmountLD = amountReceived * 99n / 100n
+        // Keep quote min aligned to user slippage against the quoted receive amount
+        sendParam.minAmountLD = applySlippageMin(amountReceived, slippagePercent)
       } catch { /* fall through to quoteSend */ }
     }
 
@@ -447,6 +465,12 @@ export async function executeOftV2Send(
   fromAddress: Address,
   toAddress: Address,
   onStatus: (msg: string) => void,
+  slippagePercent: number = 0.5,
+  /**
+   * Amount the user reviewed in the quote UI (`quote.amountReceived`).
+   * Execution never signs a weaker minimum than this floor after slippage.
+   */
+  reviewedAmountReceived?: bigint,
 ): Promise<{ txHash: Hex }> {
   const config = OFT_V2_TOKENS[token]
   if (!config) throw new Error(`Unknown OFT V2 token: ${token}`)
@@ -457,15 +481,23 @@ export async function executeOftV2Send(
   const amountLD = parseUnits(amount, config.decimals)
   const toBytes32 = addressToBytes32(toAddress)
 
-  // Get fee quote
-  onStatus('Getting fee quote...')
-  const quote = await quoteOftV2Send(publicClient, token, fromChain, toChain, amount, toAddress)
-  const feeWithBuffer = quote.nativeFee + quote.nativeFee / 10n
+  // User-reviewed floor: never lower minAmountLD below this after a re-quote.
+  const reviewedFloor = reviewedAmountReceived && reviewedAmountReceived > 0n
+    ? reviewedAmountReceived
+    : amountLD
+  const minAmountLD = applySlippageMin(reviewedFloor, slippagePercent)
 
-  // For Stargate, use quoteOFT minAmountLD; for regular OFTs, 1% slippage
-  const minAmountLD = config.isStargate
-    ? quote.amountReceived * 99n / 100n
-    : amountLD * 99n / 100n
+  // Refresh fee quote only. Do not let a worse market quote weaken the signed min.
+  onStatus('Getting fee quote...')
+  const quote = await quoteOftV2Send(
+    publicClient, token, fromChain, toChain, amount, toAddress, slippagePercent,
+  )
+  if (quote.amountReceived < minAmountLD) {
+    throw new Error(
+      'Quoted receive amount fell below your reviewed minimum. Please requote and try again.',
+    )
+  }
+  const feeWithBuffer = quote.nativeFee + quote.nativeFee / 10n
 
   // Check and set ERC20 approval — approve the source contract to spend tokens
   // For Stargate pools on remote chains, the pool contract IS the token (or needs approval on underlying)

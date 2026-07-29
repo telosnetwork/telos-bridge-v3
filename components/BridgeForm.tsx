@@ -358,7 +358,8 @@ export function BridgeForm() {
         setOftQuote(mq)
       } else if (isV2) {
         const vq = await quoteOftV2Send(publicClient, token, fromChain, toChain, amount,
-          address || '0x0000000000000000000000000000000000000001' as `0x${string}`)
+          address || '0x0000000000000000000000000000000000000001' as `0x${string}`,
+          slippage)
         setV2Quote(vq)
       } else {
         setError(createError('unsupported_route', `${token} cannot be bridged on this route`, 
@@ -368,7 +369,7 @@ export function BridgeForm() {
       const message = e.message || 'Failed to get quote'
       setError(createError('quote_failed', 'Unable to get bridge quote', message))
     } finally { setQuoting(false) }
-  }, [fromChain, toChain, token, amount, address, publicClient, isOft, isMst, isV2])
+  }, [fromChain, toChain, token, amount, address, publicClient, isOft, isMst, isV2, slippage])
 
   // Auto-quote with debounce
   useEffect(() => {
@@ -553,8 +554,10 @@ export function BridgeForm() {
           address, address, slippage, updateProgress)
         setOftQuote(null)
       } else if (v2Quote) {
-        await executeOftV2Send(walletClient, publicClient, token, fromChain, toChain, amount,
-          address, address, updateProgress)
+        await executeOftV2Send(
+          walletClient, publicClient, token, fromChain, toChain, amount,
+          address, address, updateProgress, slippage, v2Quote.amountReceived,
+        )
         setV2Quote(null)
       }
       setBridgeStatus('Source transaction confirmed. Waiting for destination delivery. Track progress on LZScan.')
