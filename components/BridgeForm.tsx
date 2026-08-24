@@ -212,6 +212,12 @@ export function BridgeForm() {
   const { data: nativeBalance } = useBalance({ address, chainId: fromChain })
 
   const isNativeToken = (token === 'TLOS' && fromChain === 40) || (token === 'ETH' && fromChain !== 40)
+  // Native ETH Stargate pools take amount + LZ fee in msg.value. Leave a gas pad so Max/send don't revert.
+  const nativeEthFeeReserve = (): number => {
+    if (!(isNativeToken && token === 'ETH')) return 0
+    const fee = v2Quote?.nativeFeeFormatted ? parseFloat(v2Quote.nativeFeeFormatted) : 0.0002
+    return fee * 1.1 + 0.0002
+  }
 
   // Get ERC20 token address for the selected token on fromChain
   const tokenAddress = getCanonicalTokenAddress(token, fromChain)
@@ -267,8 +273,8 @@ export function BridgeForm() {
   const chainName = (id: number) => getChainLabel(id)
   const chainIcon = (id: number) => CHAIN_MAP.get(id)?.icon
 
-  // Check for insufficient balance
-  const insufficientBalance = !!(address && displayBalance && amount && parseFloat(amount) > parseFloat(displayBalance.formatted))
+  // Check for insufficient balance (native ETH must also cover LZ fee + gas)
+  const insufficientBalance = !!(address && displayBalance && amount && (parseFloat(amount) + nativeEthFeeReserve()) > parseFloat(displayBalance.formatted))
   const routeLabel = isMst
     ? 'MST OFT V1'
     : isOft
@@ -480,9 +486,12 @@ export function BridgeForm() {
         'A bridge quote is required before executing the transaction'))
       return
     }
-    if (displayBalance && parseFloat(amount) > parseFloat(displayBalance.formatted)) {
-      setError(createError('insufficient_balance', `Insufficient ${token} balance`, 
-        `You need at least ${amount} ${token} but only have ${displayBalance.formatted} ${token}`))
+    if (displayBalance && (parseFloat(amount) + nativeEthFeeReserve()) > parseFloat(displayBalance.formatted)) {
+      const need = nativeEthFeeReserve() > 0
+        ? `${amount} ${token} plus ~${nativeEthFeeReserve().toFixed(5)} ETH for the Stargate fee and gas`
+        : `${amount} ${token}`
+      setError(createError('insufficient_balance', `Insufficient ${token} balance`,
+        `You need at least ${need} but only have ${displayBalance.formatted} ${token}`))
       return
     }
     setBridging(true); setError(null); setBridgeStatus('Preparing…')
@@ -618,7 +627,16 @@ export function BridgeForm() {
     }
   }
 
-  const handleMax = () => { if (displayBalance) setAmount(displayBalance.formatted) }
+  const handleMax = () => {
+    if (!displayBalance) return
+    const reserve = nativeEthFeeReserve()
+    if (reserve > 0) {
+      const max = parseFloat(displayBalance.formatted) - reserve
+      setAmount(max > 0 ? max.toFixed(6) : '0')
+      return
+    }
+    setAmount(displayBalance.formatted)
+  }
   const handleHalf = () => { if (displayBalance) setAmount((parseFloat(displayBalance.formatted) / 2).toString()) }
 
   const handleFromChain = (id: number) => {
