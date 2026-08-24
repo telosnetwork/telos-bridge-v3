@@ -504,40 +504,45 @@ export async function executeOftV2Send(
   const tokenToApprove = fromChain === 40
     ? (config.underlyingAddress || config.address)  // On Telos, approve underlying token
     : sourceAddress  // On remote chains, the Stargate pool handles its own token
-  
-  // For Stargate pools on remote chains, we need to approve the pool to spend the underlying token
-  // The pool's token() returns the underlying ERC20 address
-  let spender = sourceAddress
+
+  // StargatePoolNative.token() is address(0). send() takes the bridged ETH in msg.value
+  // together with the LZ fee. Sending fee-only reverts Stargate_InvalidAmount().
+  const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+  let nativePool = false
+
   if (fromChain !== 40 && config.isStargate) {
-    // For remote Stargate pools, approve the pool to spend the underlying token
     try {
       const underlyingToken = await publicClient.readContract({
         address: sourceAddress,
         abi: [{ name: 'token', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }],
         functionName: 'token',
       }) as Address
-      onStatus('Checking token approval...')
-      const allowance = await publicClient.readContract({
-        address: underlyingToken,
-        abi: ERC20_ABI,
-        functionName: 'allowance',
-        args: [fromAddress, sourceAddress],
-      }) as bigint
-      if (allowance < amountLD) {
-        onStatus(`Approve ${config.symbol} spend...`)
-        const approveTx = await walletClient.writeContract({
+      nativePool = !underlyingToken || underlyingToken.toLowerCase() === ZERO_ADDRESS
+      if (!nativePool) {
+        onStatus('Checking token approval...')
+        const allowance = await publicClient.readContract({
           address: underlyingToken,
           abi: ERC20_ABI,
-          functionName: 'approve',
-          args: [sourceAddress, amountLD],
-          chain: undefined,
-          account: fromAddress,
-        })
-        await publicClient.waitForTransactionReceipt({ hash: approveTx })
-        onStatus('Approved! Sending bridge...')
+          functionName: 'allowance',
+          args: [fromAddress, sourceAddress],
+        }) as bigint
+        if (allowance < amountLD) {
+          onStatus(`Approve ${config.symbol} spend...`)
+          const approveTx = await walletClient.writeContract({
+            address: underlyingToken,
+            abi: ERC20_ABI,
+            functionName: 'approve',
+            args: [sourceAddress, amountLD],
+            chain: undefined,
+            account: fromAddress,
+          })
+          await publicClient.waitForTransactionReceipt({ hash: approveTx })
+          onStatus('Approved! Sending bridge...')
+        }
       }
     } catch {
-      // If token() fails, skip approval (might be native or OFT pattern)
+      // token() missing: native ETH pool, or OFT that does not need approval
+      nativePool = config.symbol === 'ETH'
     }
   } else {
     onStatus('Checking token approval...')
@@ -562,6 +567,8 @@ export async function executeOftV2Send(
     }
   }
 
+  const value = nativePool ? amountLD + feeWithBuffer : feeWithBuffer
+
   // Execute send
   onStatus('Confirm bridge in wallet...')
   const txHash = await walletClient.writeContract({
@@ -581,7 +588,7 @@ export async function executeOftV2Send(
       { nativeFee: feeWithBuffer, lzTokenFee: 0n },
       fromAddress,
     ],
-    value: feeWithBuffer,
+    value,
     gas: 500000n,
     chain: undefined,
     account: fromAddress,
