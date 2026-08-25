@@ -10,6 +10,7 @@ interface AmountInputProps {
   onHalf: () => void
   onQuarter: () => void
   className?: string
+  hint?: string
 }
 
 export function AmountInput({ 
@@ -21,7 +22,8 @@ export function AmountInput({
   onMax, 
   onHalf,
   onQuarter,
-  className
+  className,
+  hint,
 }: AmountInputProps) {
   const quickAmounts = [
     { label: '25%', action: onQuarter },
@@ -56,6 +58,9 @@ export function AmountInput({
             <span className={insufficientBalance ? 'text-red-400' : 'text-gray-500'}>
               {parseFloat(balance.formatted).toFixed(4)} {token} available
             </span>
+            {hint && (
+              <span className="block text-[11px] text-gray-500 mt-0.5 leading-snug">{hint}</span>
+            )}
           </div>
           
           <div className="flex gap-2">

@@ -212,11 +212,19 @@ export function BridgeForm() {
   const { data: nativeBalance } = useBalance({ address, chainId: fromChain })
 
   const isNativeToken = (token === 'TLOS' && fromChain === 40) || (token === 'ETH' && fromChain !== 40)
-  // Native ETH Stargate pools take amount + LZ fee in msg.value. Leave a gas pad so Max/send don't revert.
-  const nativeEthFeeReserve = (): number => {
-    if (!(isNativeToken && token === 'ETH')) return 0
-    const fee = v2Quote?.nativeFeeFormatted ? parseFloat(v2Quote.nativeFeeFormatted) : 0.0002
-    return fee * 1.1 + 0.0002
+  // Native Stargate/OFT sends take amount + LZ fee in msg.value. Leave a gas pad so Max/send don't revert.
+  const nativeGasReserve = (): number => {
+    if (!isNativeToken) return 0
+    const feeStr = oftQuote?.nativeFeeFormatted || v2Quote?.nativeFeeFormatted
+    const fallbackFee = token === 'ETH' ? 0.0002 : 1
+    const fee = feeStr ? parseFloat(feeStr) : fallbackFee
+    const gasPad = token === 'ETH' ? 0.0002 : 0.5
+    return fee * 1.1 + gasPad
+  }
+  const formatSuggestedSend = (value: number): string => {
+    if (value <= 0) return '0'
+    const formatted = token === 'ETH' ? value.toFixed(6) : value.toFixed(4)
+    return formatted.replace(/\.?0+$/, '') || '0'
   }
 
   // Get ERC20 token address for the selected token on fromChain
@@ -273,8 +281,14 @@ export function BridgeForm() {
   const chainName = (id: number) => getChainLabel(id)
   const chainIcon = (id: number) => CHAIN_MAP.get(id)?.icon
 
-  // Check for insufficient balance (native ETH must also cover LZ fee + gas)
-  const insufficientBalance = !!(address && displayBalance && amount && (parseFloat(amount) + nativeEthFeeReserve()) > parseFloat(displayBalance.formatted))
+  // Check for insufficient balance (native gas token must also cover LZ fee + gas)
+  const nativeReserve = nativeGasReserve()
+  const suggestedSend = displayBalance
+    ? Math.max(0, parseFloat(displayBalance.formatted) - nativeReserve)
+    : 0
+  const suggestedSendLabel = formatSuggestedSend(suggestedSend)
+  const insufficientBalance = !!(address && displayBalance && amount && (parseFloat(amount) + nativeReserve) > parseFloat(displayBalance.formatted))
+  const showGasReserveWarning = !!(address && displayBalance && amount && parseFloat(amount) > 0 && isNativeToken && insufficientBalance)
   const routeLabel = isMst
     ? 'MST OFT V1'
     : isOft
@@ -486,12 +500,16 @@ export function BridgeForm() {
         'A bridge quote is required before executing the transaction'))
       return
     }
-    if (displayBalance && (parseFloat(amount) + nativeEthFeeReserve()) > parseFloat(displayBalance.formatted)) {
-      const need = nativeEthFeeReserve() > 0
-        ? `${amount} ${token} plus ~${nativeEthFeeReserve().toFixed(5)} ETH for the Stargate fee and gas`
+    if (displayBalance && (parseFloat(amount) + nativeGasReserve()) > parseFloat(displayBalance.formatted)) {
+      const reserve = nativeGasReserve()
+      const suggested = formatSuggestedSend(Math.max(0, parseFloat(displayBalance.formatted) - reserve))
+      const need = reserve > 0
+        ? `${amount} ${token} plus ~${reserve.toFixed(5)} ${token} for the bridge fee and gas`
         : `${amount} ${token}`
       setError(createError('insufficient_balance', `Insufficient ${token} balance`,
-        `You need at least ${need} but only have ${displayBalance.formatted} ${token}`))
+        suggested === '0'
+          ? `You need at least ${need} but only have ${displayBalance.formatted} ${token}.`
+          : `You need at least ${need} but only have ${displayBalance.formatted} ${token}. You can send ${suggested} ${token}.`))
       return
     }
     setBridging(true); setError(null); setBridgeStatus('Preparing…')
@@ -629,10 +647,10 @@ export function BridgeForm() {
 
   const handleMax = () => {
     if (!displayBalance) return
-    const reserve = nativeEthFeeReserve()
+    const reserve = nativeGasReserve()
     if (reserve > 0) {
       const max = parseFloat(displayBalance.formatted) - reserve
-      setAmount(max > 0 ? max.toFixed(6) : '0')
+      setAmount(max > 0 ? formatSuggestedSend(max) : '0')
       return
     }
     setAmount(displayBalance.formatted)
@@ -728,6 +746,9 @@ export function BridgeForm() {
             onHalf={handleHalf}
             onQuarter={() => { if (displayBalance) setAmount((parseFloat(displayBalance.formatted) / 4).toString()) }}
             className="flex-1 min-w-0"
+            hint={isNativeToken && address && displayBalance && nativeReserve > 0
+              ? `Leave ~${nativeReserve.toFixed(5)} ${token} for fee + gas. You can send ${suggestedSendLabel} ${token}.`
+              : undefined}
           />
           
           <TokenSelectorModal 
@@ -736,6 +757,28 @@ export function BridgeForm() {
             onTokenChange={(newToken) => { setToken(newToken); clearQuotes() }}
           />
         </div>
+
+        {showGasReserveWarning && (
+          <div className="bg-amber-500/[0.06] border border-amber-500/10 rounded-xl px-4 py-3 text-xs text-amber-400/90 leading-relaxed">
+            {suggestedSend <= 0 ? (
+              <span>
+                This amount does not leave enough {token} for the network fee and gas (~{nativeReserve.toFixed(5)} {token}).
+              </span>
+            ) : (
+              <span>
+                This amount does not leave enough {token} for the network fee and gas (~{nativeReserve.toFixed(5)} {token}).
+                You can send <span className="font-mono text-amber-300">{suggestedSendLabel} {token}</span>.
+                <button
+                  type="button"
+                  onClick={() => setAmount(suggestedSendLabel)}
+                  className="ml-2 underline decoration-amber-400/50 hover:text-amber-200 touch-manipulation"
+                >
+                  Use this amount
+                </button>
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Quote display */}
         {(hasQuote || quoting) && (
