@@ -192,8 +192,8 @@ select option { background: #1a1a28; color: #e0e0e8; }
     will-change: auto;
   }
   
-  /* Better touch targets */
-  button, [role="button"] {
+  /* Better touch targets — skip compact chip controls */
+  button:not(.chip-btn), [role="button"]:not(.chip-btn) {
     min-height: 44px;
     min-width: 44px;
   }

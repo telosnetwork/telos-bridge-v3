@@ -49,35 +49,38 @@ export function AmountInput({
 
       {/* Balance and quick amounts */}
       {balance && (
-        <div className="flex items-center justify-between text-sm">
-          <div className="flex items-center gap-1.5">
-            <svg className="w-3.5 h-3.5 text-gray-500" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M21 18v1c0 1.1-.9 2-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14c1.1 0 2 .9 2 2v1h-9a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h9z"/>
-              <path d="M12 16h10V8H12v8zm2-4a2 2 0 1 1 4 0 2 2 0 0 1-4 0z"/>
-            </svg>
-            <span className={insufficientBalance ? 'text-red-400' : 'text-gray-500'}>
-              {parseFloat(balance.formatted).toFixed(4)} {token} available
-            </span>
-            {hint && (
-              <span className="block text-[11px] text-gray-500 mt-0.5 leading-snug">{hint}</span>
-            )}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <svg className="w-3.5 h-3.5 text-gray-500 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M21 18v1c0 1.1-.9 2-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14c1.1 0 2 .9 2 2v1h-9a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h9z"/>
+                <path d="M12 16h10V8H12v8zm2-4a2 2 0 1 1 4 0 2 2 0 0 1-4 0z"/>
+              </svg>
+              <span className={`truncate ${insufficientBalance ? 'text-red-400' : 'text-gray-500'}`}>
+                {parseFloat(balance.formatted).toFixed(4)} {token} available
+              </span>
+            </div>
+            
+            <div className="flex shrink-0 gap-1.5">
+              {quickAmounts.map(({ label, action, highlight }) => (
+                <button 
+                  key={label}
+                  type="button"
+                  onClick={action} 
+                  className={`chip-btn text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all duration-200 touch-manipulation active:scale-95 ${
+                    highlight
+                      ? 'text-telos-cyan bg-telos-cyan/10 border border-telos-cyan/30 hover:bg-telos-cyan/15 hover:border-telos-cyan/50'
+                      : 'text-gray-500 bg-white/[0.03] hover:text-gray-300 hover:bg-white/[0.08] border border-transparent hover:border-gray-600/30'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-          
-          <div className="flex gap-2">
-            {quickAmounts.map(({ label, action, highlight }) => (
-              <button 
-                key={label}
-                onClick={action} 
-                className={`text-xs px-3 py-2 sm:px-2.5 sm:py-1.5 rounded-lg font-medium transition-all duration-200 touch-manipulation active:scale-95 ${
-                  highlight
-                    ? 'text-telos-cyan bg-telos-cyan/10 border border-telos-cyan/30 hover:bg-telos-cyan/15 hover:border-telos-cyan/50'
-                    : 'text-gray-500 bg-white/[0.03] hover:text-gray-300 hover:bg-white/[0.08] border border-transparent hover:border-gray-600/30'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          {hint && (
+            <p className="text-[11px] text-gray-500 leading-snug">{hint}</p>
+          )}
         </div>
       )}
     </div>
