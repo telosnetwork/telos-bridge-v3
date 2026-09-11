@@ -706,8 +706,8 @@ export function BridgeForm() {
             />
           </div>
 
-          {/* Swap button — between the two selectors */}
-          <div className="relative z-20 flex items-center justify-center" style={{ marginTop: '-12px', marginBottom: '-12px' }}>
+          {/* Swap button — overlap on desktop row, gap on stacked mobile */}
+          <div className="relative z-20 flex items-center justify-center my-2 sm:-my-3">
             <button 
               onClick={swap}
               className="w-10 h-10 rounded-full bg-[#1a1a28] border-2 sm:border border-gray-700/50 flex items-center justify-center hover:border-telos-cyan/50 hover:bg-telos-cyan/5 hover:rotate-180 duration-300 text-gray-400 hover:text-telos-cyan shrink-0 group active:scale-95 touch-manipulation shadow-lg shadow-black/50 sm:shadow-none"
@@ -735,7 +735,7 @@ export function BridgeForm() {
         <div className="border-t border-white/[0.03]"></div>
 
         {/* Amount input */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-3 sm:gap-4">
           <AmountInput
             amount={amount}
             onAmountChange={setAmount}
